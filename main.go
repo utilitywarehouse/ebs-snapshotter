@@ -106,7 +106,6 @@ func main() {
 		ec2Client := ec2.New(sess)
 
 		for {
-			<-time.After(time.Duration(30) * time.Minute)
 			log.Print("Checking volumes and snapshots...")
 			vols, err := getVolumes(ec2Client)
 			if err != nil {
@@ -132,6 +131,7 @@ func main() {
 					}
 				}
 			}
+			<-time.After(time.Duration(30) * time.Minute)
 		}
 	}
 	app.Run(os.Args)
