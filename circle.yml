@@ -1,0 +1,20 @@
+machine:
+  services:
+    - docker
+
+general:
+  branches:
+    only:
+      - master
+
+dependencies:
+  pre:
+    - docker login -e none@none.com -u ${DOCKER_USER} -p ${DOCKER_PASS} registry.uw.systems
+
+test:
+  override:
+    - CGO_ENABLED=0 go build -a -ldflags "-X main.gitHash=$(git rev-parse HEAD) -s -extldflags '-static'"
+  post:
+    - docker build --rm=true -t registry.uw.systems/system/ebs-snapshotter:latest .
+    - docker tag registry.uw.systems/system/ebs-snapshotter:latest registry.uw.systems/system/ebs-snapshotter:$CIRCLE_SHA1
+    - docker push registry.uw.systems/system/ebs-snapshotter
