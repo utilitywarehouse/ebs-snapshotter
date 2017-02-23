@@ -11,6 +11,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
@@ -18,7 +19,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/utilitywarehouse/go-operational/op"
-	"github.com/aws/aws-sdk-go/aws/session"
 )
 
 var (
@@ -32,7 +32,7 @@ var (
 type VolumeSnapshotConfigs []*VolumeSnapshotConfig
 
 type VolumeSnapshotConfig struct {
-	Labels          Label`json:"labels"`
+	Labels          Label `json:"labels"`
 	IntervalSeconds int64 `json:"intervalSeconds"`
 }
 
@@ -101,7 +101,7 @@ func main() {
 		}
 		config := aws.NewConfig()
 		config.WithCredentials(credentials.NewStaticCredentials(*awsAccessKey, *awsSecretKey, "")).
-			WithRegion("eu-west-1")
+			WithRegion(*ec2Region)
 		sess := session.New(config)
 		ec2Client := ec2.New(sess)
 
@@ -127,7 +127,7 @@ func main() {
 					for _, tag := range vol.Tags {
 						if *tag.Key == key && *tag.Value == val {
 							log.Printf("Found volume %s matching tags %s=%s", *vol.VolumeId, key, val)
-							funcName(vol, snaps[*vol.VolumeId], acceptableStartTime, ec2Client)
+							CheckSnapshot(vol, snaps[*vol.VolumeId], acceptableStartTime, ec2Client)
 						}
 					}
 				}
@@ -136,8 +136,9 @@ func main() {
 	}
 	app.Run(os.Args)
 }
-func funcName(vol *ec2.Volume, lastSnapshot *ec2.Snapshot, acceptableStartTime time.Time, ec2Client *ec2.EC2) {
-	if lastSnapshot != nil && lastSnapshot.StartTime.Before(acceptableStartTime) && *lastSnapshot.State != "error" {
+
+func CheckSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot, acceptableStartTime time.Time, ec2Client *ec2.EC2) {
+	if lastSnapshot != nil && !lastSnapshot.StartTime.Before(acceptableStartTime) && *lastSnapshot.State != "error" {
 		log.Printf("Volume %s has an up to date snapshot", *vol.VolumeId)
 		return
 	}
@@ -244,6 +245,6 @@ func getOpHandler() http.Handler {
 			AddOwner("telecom", "#telecom").
 			SetRevision(gitHash).
 			ReadyUseHealthCheck().
-			AddLink("VCS Repo", "https://github.com/utilitywarehouse/k8s-ebs-snapshotter"),
+			AddLink("VCS Repo", "https://github.com/utilitywarehouse/ebs-snapshotter"),
 	)
 }
