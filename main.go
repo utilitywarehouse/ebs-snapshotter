@@ -67,6 +67,12 @@ func main() {
 		EnvVar: "VOLUME_SNAPSHOT_CONFIG_FILE",
 		Value:  "",
 	})
+	ec2Region := app.String(cli.StringOpt{
+		Name:   "region",
+		Desc:   "AWS Region",
+		EnvVar: "AWS_REGION",
+		Value:  "eu-west-1",
+	})
 
 	snapshotsCreated = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "snapshots_performed",
@@ -120,21 +126,8 @@ func main() {
 				for _, vol := range vols {
 					for _, tag := range vol.Tags {
 						if *tag.Key == key && *tag.Value == val {
-
 							log.Printf("Found volume %s matching tags %s=%s", *vol.VolumeId, key, val)
-							lastSnapshotForVol := snaps[*vol.VolumeId]
-							if lastSnapshotForVol == nil || lastSnapshotForVol.StartTime.Before(acceptableStartTime) ||  *lastSnapshotForVol.State == "error" {
-								if err := makeSnapshot(ec2Client, vol); err != nil {
-									log.Printf("Error creating snapshot for volume %s: %v", *vol.VolumeId, err)
-									errors.Inc()
-								} else {
-									log.Printf("Created snapshot for volume %s", *vol.VolumeId)
-									snapshotsCreated.WithLabelValues(*vol.VolumeId).Inc()
-								}
-								break
-							} else {
-								log.Printf("Volume %s has an up to date snapshot", *vol.VolumeId)
-							}
+							funcName(vol, snaps[*vol.VolumeId], acceptableStartTime, ec2Client)
 						}
 					}
 				}
@@ -142,6 +135,20 @@ func main() {
 		}
 	}
 	app.Run(os.Args)
+}
+func funcName(vol *ec2.Volume, lastSnapshot *ec2.Snapshot, acceptableStartTime time.Time, ec2Client *ec2.EC2) {
+	if lastSnapshot != nil && lastSnapshot.StartTime.Before(acceptableStartTime) && *lastSnapshot.State != "error" {
+		log.Printf("Volume %s has an up to date snapshot", *vol.VolumeId)
+		return
+	}
+	err := makeSnapshot(ec2Client, vol)
+	if err != nil {
+		log.Printf("Error creating snapshot for volume %s: %v", *vol.VolumeId, err)
+		errors.Inc()
+		return
+	}
+	log.Printf("Created snapshot for volume %s", *vol.VolumeId)
+	snapshotsCreated.WithLabelValues(*vol.VolumeId).Inc()
 }
 
 func makeSnapshot(ec2Client *ec2.EC2, volume *ec2.Volume) error {
