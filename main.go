@@ -23,8 +23,8 @@ import (
 
 var (
 	gitHash          string = ""
-	NAME                    = "k8s-ebs-snapshotter"
-	DESC                    = `Snapshots EBS volumes used by Kubernetes`
+	NAME                    = "ebs-snapshotter"
+	DESC                    = `Snapshots EBS volumes automatically`
 	snapshotsCreated *prometheus.CounterVec
 	errors           prometheus.Counter
 )
