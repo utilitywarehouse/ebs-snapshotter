@@ -206,6 +206,7 @@ func getVolumes(ec2Client *ec2.EC2) (map[string]*ec2.Volume, error) {
 	for vols.NextToken != nil {
 		vols, err := ec2Client.DescribeVolumes(&ec2.DescribeVolumesInput{
 			MaxResults: &maxResults,
+			NextToken: vols.NextToken,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("Error while describing volumes: %v", err)
