@@ -67,6 +67,12 @@ func main() {
 		EnvVar: "VOLUME_SNAPSHOT_CONFIG_FILE",
 		Value:  "",
 	})
+	pollIntervalSeconds := app.Int(cli.IntOpt{
+		Name: "poll-interval-seconds",
+		Desc: "The interval in seconds between snapshot freshness checks",
+		EnvVar: "POLL_INTERVAL_SECONDS",
+		Value: 1800,
+	})
 	ec2Region := app.String(cli.StringOpt{
 		Name:   "region",
 		Desc:   "AWS Region",
@@ -86,55 +92,77 @@ func main() {
 	prometheus.DefaultRegisterer.MustRegister(snapshotsCreated, errors)
 
 	app.Action = func() {
+		snapshotConfigs := LoadVolumeSnapshotConfig(*volumeSnapshotConfigFile)
+		ec2Client := CreateEc2Client(*awsAccessKey, *awsSecretKey, *ec2Region)
+
 		go initialiseHttpServer(*httpPort)
-		confFile, err := os.Open(*volumeSnapshotConfigFile)
-		if err != nil {
-			log.Fatalf("Error while opening volume snapshot config file: %v", err)
-		}
-		fileContent, err := ioutil.ReadAll(confFile)
-		if err != nil {
-			log.Fatalf("Error while reading volume snapshot config file: %v", err)
-		}
-		snapshotConfigs := &VolumeSnapshotConfigs{}
-		if err = json.Unmarshal(fileContent, snapshotConfigs); err != nil {
-			log.Fatalf("Error while deserialising volume snapshot config file: %v", err)
-		}
-		config := aws.NewConfig()
-		config.WithCredentials(credentials.NewStaticCredentials(*awsAccessKey, *awsSecretKey, "")).
-			WithRegion(*ec2Region)
-		sess := session.New(config)
-		ec2Client := ec2.New(sess)
-
-		for {
-			log.Print("Checking volumes and snapshots...")
-			vols, err := getVolumes(ec2Client)
-			if err != nil {
-				log.Printf("Error while fetching volumes: %v", err)
-				continue
-			}
-			snaps, err := getSnapshots(ec2Client)
-			if err != nil {
-				log.Printf("Error while fetching snapshots: %v", err)
-				continue
-			}
-			for _, config := range *snapshotConfigs {
-				key := config.Labels.Key
-				val := config.Labels.Value
-				acceptableStartTime := time.Now().Add(time.Duration(-config.IntervalSeconds) * time.Second)
-
-				for _, vol := range vols {
-					for _, tag := range vol.Tags {
-						if *tag.Key == key && *tag.Value == val {
-							log.Printf("Found volume %s matching tags %s=%s", *vol.VolumeId, key, val)
-							CheckSnapshot(vol, snaps[*vol.VolumeId], acceptableStartTime, ec2Client)
-						}
-					}
-				}
-			}
-			<-time.After(time.Duration(30) * time.Minute)
-		}
+		WatchSnapshots(*pollIntervalSeconds, ec2Client, snapshotConfigs)
 	}
 	app.Run(os.Args)
+}
+
+func WatchSnapshots(intervalSeconds int, ec2Client *ec2.EC2, snapshotConfigs *VolumeSnapshotConfigs) {
+	for {
+		log.Print("Checking volumes and snapshots")
+		if err := CheckSnapshots(ec2Client, snapshotConfigs); err != nil {
+			log.Printf("Error while checking snapshots: %v", err)
+		}
+		log.Print("Finished checking volumes and snapshots")
+		<-time.After(time.Duration(intervalSeconds) * time.Second)
+	}
+}
+
+func CheckSnapshots(ec2Client *ec2.EC2, snapshotConfigs *VolumeSnapshotConfigs) error {
+	vols, err := getVolumes(ec2Client)
+	if err != nil {
+		return fmt.Errorf("Error while fetching volumes: %v", err)
+
+	}
+
+	snaps, err := getSnapshots(ec2Client)
+	if err != nil {
+		return fmt.Errorf("Error while fetching snapshots: %v", err)
+	}
+	for _, config := range *snapshotConfigs {
+		key := config.Labels.Key
+		val := config.Labels.Value
+		acceptableStartTime := time.Now().Add(time.Duration(-config.IntervalSeconds) * time.Second)
+
+		for _, vol := range vols {
+			for _, tag := range vol.Tags {
+				if *tag.Key == key && *tag.Value == val {
+					log.Printf("Found volume %s matching tags %s=%s", *vol.VolumeId, key, val)
+					CheckSnapshot(vol, snaps[*vol.VolumeId], acceptableStartTime, ec2Client)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func CreateEc2Client(awsAccessKey string, awsSecretKey string, ec2Region string) *ec2.EC2 {
+	config := aws.NewConfig()
+	config.WithCredentials(credentials.NewStaticCredentials(awsAccessKey, awsSecretKey, "")).
+		WithRegion(ec2Region)
+	awsSess := session.New(config)
+	ec2Client := ec2.New(awsSess)
+	return ec2Client
+}
+
+func LoadVolumeSnapshotConfig(volumeSnapshotConfigFile string) *VolumeSnapshotConfigs {
+	confFile, err := os.Open(volumeSnapshotConfigFile)
+	if err != nil {
+		log.Fatalf("Error while opening volume snapshot config file: %v", err)
+	}
+	fileContent, err := ioutil.ReadAll(confFile)
+	if err != nil {
+		log.Fatalf("Error while reading volume snapshot config file: %v", err)
+	}
+	snapshotConfigs := &VolumeSnapshotConfigs{}
+	if err = json.Unmarshal(fileContent, snapshotConfigs); err != nil {
+		log.Fatalf("Error while deserialising volume snapshot config file: %v", err)
+	}
+	return snapshotConfigs
 }
 
 func CheckSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot, acceptableStartTime time.Time, ec2Client *ec2.EC2) {
