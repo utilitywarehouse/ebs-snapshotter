@@ -133,6 +133,7 @@ func CheckSnapshots(ec2Client *ec2.EC2, snapshotConfigs *VolumeSnapshotConfigs) 
 				if *tag.Key == key && *tag.Value == val {
 					log.Printf("Found volume %s matching tags %s=%s", *vol.VolumeId, key, val)
 					CheckSnapshot(vol, snaps[*vol.VolumeId], acceptableStartTime, ec2Client)
+					break
 				}
 			}
 		}
