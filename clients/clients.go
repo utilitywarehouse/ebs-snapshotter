@@ -7,9 +7,12 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+type EC2Volumes map[string]*ec2.Volume
+type EC2Snapshots map[string]*ec2.Snapshot
+
 type Client interface {
-	GetVolumes() (map[string]*ec2.Volume, error)
-	GetSnapshots() (map[string]*ec2.Snapshot, error)
+	GetVolumes() (EC2Volumes, error)
+	GetSnapshots() (EC2Snapshots, error)
 	CreateSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot) error
 	RemoveSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot) error
 }
@@ -28,7 +31,7 @@ func NewEBSClient(c *ec2.EC2, scc, sdc *prometheus.CounterVec) *EBSClient {
 	}
 }
 
-func (c *EBSClient) GetVolumes() (map[string]*ec2.Volume, error) {
+func (c *EBSClient) GetVolumes() (EC2Volumes, error) {
 	maxResults := int64(1000)
 	volumes := make([]*ec2.Volume, 0)
 	input := &ec2.DescribeVolumesInput{
@@ -55,7 +58,7 @@ func (c *EBSClient) GetVolumes() (map[string]*ec2.Volume, error) {
 	return mapVolumesToIds(volumes), nil
 }
 
-func (c *EBSClient) GetSnapshots() (map[string]*ec2.Snapshot, error) {
+func (c *EBSClient) GetSnapshots() (EC2Snapshots, error) {
 	maxResults := int64(1000)
 	snapshots := make([]*ec2.Snapshot, 0)
 
@@ -109,16 +112,16 @@ func (c *EBSClient) RemoveSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot) 
 	return nil
 }
 
-func mapVolumesToIds(volumes []*ec2.Volume) map[string]*ec2.Volume {
-	output := make(map[string]*ec2.Volume)
+func mapVolumesToIds(volumes []*ec2.Volume) EC2Volumes {
+	output := make(EC2Volumes)
 	for _, vol := range volumes {
 		output[*vol.VolumeId] = vol
 	}
 	return output
 }
 
-func mapMostRecentSnapshotToVolumes(snapshots []*ec2.Snapshot) map[string]*ec2.Snapshot {
-	output := make(map[string]*ec2.Snapshot)
+func mapMostRecentSnapshotToVolumes(snapshots []*ec2.Snapshot) EC2Snapshots {
+	output := make(EC2Snapshots)
 	for _, snapshot := range snapshots {
 		existingSnapshot := output[*snapshot.VolumeId]
 		if existingSnapshot == nil || existingSnapshot.StartTime.Before(*snapshot.StartTime) {
