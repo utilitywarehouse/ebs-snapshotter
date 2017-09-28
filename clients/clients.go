@@ -1,8 +1,8 @@
 package clients
 
 import (
-	"fmt"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 )
@@ -40,7 +40,7 @@ func (c *EBSClient) GetVolumes() (EC2Volumes, error) {
 
 	vols, err := c.ec2Client.DescribeVolumes(input)
 	if err != nil {
-		return nil, fmt.Errorf("error while describing volumes: %v", err)
+		return nil, errors.Wrap(err, "error while describing volumes")
 	}
 
 	volumes = append(volumes, vols.Volumes...)
@@ -50,7 +50,7 @@ func (c *EBSClient) GetVolumes() (EC2Volumes, error) {
 			NextToken:  vols.NextToken,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("error while describing volumes: %v", err)
+			return nil, errors.Wrap(err, "error while describing volumes")
 		}
 		volumes = append(volumes, vols.Volumes...)
 	}
@@ -66,7 +66,7 @@ func (c *EBSClient) GetSnapshots() (EC2Snapshots, error) {
 		MaxResults: &maxResults,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("error while describing volumes: %v", err)
+		return nil, errors.Wrap(err, "error while describing snapshots")
 	}
 
 	snapshots = append(snapshots, snaps.Snapshots...)
@@ -76,7 +76,7 @@ func (c *EBSClient) GetSnapshots() (EC2Snapshots, error) {
 			NextToken:  snaps.NextToken,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("error while describing volumes: %v", err)
+			return nil, errors.Wrap(err, "error while describing snapshots")
 		}
 		snapshots = append(snapshots, snaps.Snapshots...)
 	}
@@ -92,7 +92,7 @@ func (c *EBSClient) CreateSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot) 
 	}
 
 	if _, err := c.ec2Client.CreateSnapshot(input); err != nil {
-		return err
+		return errors.Wrap(err, "error while creating a snapshot")
 	}
 	log.Printf("created snapshot for volume %s", *vol.VolumeId)
 	c.snapshotsCreatedCounter.WithLabelValues(*vol.VolumeId).Inc()
@@ -104,7 +104,7 @@ func (c *EBSClient) RemoveSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot) 
 	if _, err := c.ec2Client.DeleteSnapshot(&ec2.DeleteSnapshotInput{
 		SnapshotId: lastSnapshot.SnapshotId,
 	}); err != nil {
-		return err
+		return errors.Wrap(err, "error while removing a snapshot")
 	}
 	log.Printf("old snapshot with id %s for volume %s has been deleted", *vol.VolumeId, *lastSnapshot.SnapshotId)
 	c.snapshotsDeletedCounter.WithLabelValues(*vol.VolumeId, *lastSnapshot.SnapshotId).Inc()
