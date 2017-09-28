@@ -3,7 +3,6 @@ package clients
 import (
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 )
 
 type EC2Volumes map[string]*ec2.Volume
@@ -89,7 +88,6 @@ func (c *EBSClient) CreateSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot) 
 	if _, err := c.ec2Client.CreateSnapshot(input); err != nil {
 		return errors.Wrap(err, "error while creating a snapshot")
 	}
-	log.Printf("created snapshot for volume %s", *vol.VolumeId)
 
 	return nil
 }
@@ -100,7 +98,6 @@ func (c *EBSClient) RemoveSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot) 
 	}); err != nil {
 		return errors.Wrap(err, "error while removing a snapshot")
 	}
-	log.Printf("old snapshot with id %s for volume %s has been deleted", *vol.VolumeId, *lastSnapshot.SnapshotId)
 
 	return nil
 }

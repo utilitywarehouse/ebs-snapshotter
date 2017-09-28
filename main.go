@@ -158,7 +158,7 @@ func WatchSnapshots(
 							log.Printf("error occured while creating snapshot: %v", err)
 							continue
 						}
-						log.Printf("new snapshot created for volume %s", *vol.VolumeId)
+						log.Printf("created snapshot for volume %s", *vol.VolumeId)
 						createdCounter.WithLabelValues(*vol.VolumeId).Inc()
 
 						if lastSnapshot == nil && lastSnapshot.StartTime.After(retentionStartDate) {
