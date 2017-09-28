@@ -26,6 +26,7 @@ var (
 	NAME                    = "ebs-snapshotter"
 	DESC                    = `Snapshots EBS volumes automatically`
 	snapshotsCreated *prometheus.CounterVec
+	snapshotsDeleted *prometheus.CounterVec
 	errors           prometheus.Counter
 )
 
@@ -68,10 +69,10 @@ func main() {
 		Value:  "",
 	})
 	pollIntervalSeconds := app.Int(cli.IntOpt{
-		Name: "poll-interval-seconds",
-		Desc: "The interval in seconds between snapshot freshness checks",
+		Name:   "poll-interval-seconds",
+		Desc:   "The interval in seconds between snapshot freshness checks",
 		EnvVar: "POLL_INTERVAL_SECONDS",
-		Value: 1800,
+		Value:  1800,
 	})
 	ec2Region := app.String(cli.StringOpt{
 		Name:   "region",
@@ -79,66 +80,81 @@ func main() {
 		EnvVar: "AWS_REGION",
 		Value:  "eu-west-1",
 	})
+	oldSnapshotsRetentionPeriod := app.Int(cli.IntOpt{
+		Name:   "old-snapshots-retention-period-hours",
+		Desc:   "Specifies for how long time period to retain the old EBS snapshots",
+		EnvVar: "OLD_SNAPSHOTS_RETENTION_PERIOD_HOURS",
+		Value:  168,
+	})
 
 	snapshotsCreated = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "snapshots_performed",
 		Help: "A counter of the total number of snapshots created",
 	}, []string{"volumeId"})
+	snapshotsDeleted = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "old_snapshots_removed",
+		Help: "A counter of the total number of old snapshots removed",
+	}, []string{"volumeId", "snapshotId"})
 	errors = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "errors",
 		Help: "A counter of the total number of errors encountered",
 	})
 
-	prometheus.DefaultRegisterer.MustRegister(snapshotsCreated, errors)
+	prometheus.DefaultRegisterer.MustRegister(snapshotsCreated, snapshotsDeleted, errors)
 
 	app.Action = func() {
 		snapshotConfigs := LoadVolumeSnapshotConfig(*volumeSnapshotConfigFile)
 		ec2Client := CreateEc2Client(*awsAccessKey, *awsSecretKey, *ec2Region)
 
 		go initialiseHttpServer(*httpPort)
-		WatchSnapshots(*pollIntervalSeconds, ec2Client, snapshotConfigs)
+		WatchSnapshots(*pollIntervalSeconds, *oldSnapshotsRetentionPeriod, ec2Client, snapshotConfigs)
 	}
 	app.Run(os.Args)
 }
 
-func WatchSnapshots(intervalSeconds int, ec2Client *ec2.EC2, snapshotConfigs *VolumeSnapshotConfigs) {
+func WatchSnapshots(intervalSeconds, retentionPeriod int, ec2Client *ec2.EC2, snapshotConfigs *VolumeSnapshotConfigs) {
 	for {
-		log.Print("Checking volumes and snapshots")
-		if err := CheckSnapshots(ec2Client, snapshotConfigs); err != nil {
-			log.Printf("Error while checking snapshots: %v", err)
+		vols, err := getVolumes(ec2Client)
+		if err != nil {
+			log.Printf("error while fetching volumes: %v", err)
+
 		}
-		log.Print("Finished checking volumes and snapshots")
+
+		snaps, err := getSnapshots(ec2Client)
+		if err != nil {
+			log.Printf("error while fetching snapshots: %v", err)
+		}
+
+		log.Print("checking volumes and snapshots")
+		retentionStartDate := time.Now().Add(-time.Duration(retentionPeriod) * time.Hour)
+		for _, config := range *snapshotConfigs {
+			key := config.Labels.Key
+			val := config.Labels.Value
+
+			acceptableStartTime := time.Now().Add(time.Duration(-config.IntervalSeconds) * time.Second)
+			for _, vol := range vols {
+				for _, tag := range vol.Tags {
+					if *tag.Key == key && *tag.Value == val {
+						lastSnapshot := snaps[*vol.VolumeId]
+						CheckSnapshot(vol, lastSnapshot, acceptableStartTime, ec2Client)
+						RemoveOldSnapshot(vol, lastSnapshot, retentionStartDate, ec2Client)
+					}
+				}
+			}
+		}
+		log.Print("finished checking volumes and snapshots")
 		<-time.After(time.Duration(intervalSeconds) * time.Second)
 	}
 }
 
-func CheckSnapshots(ec2Client *ec2.EC2, snapshotConfigs *VolumeSnapshotConfigs) error {
-	vols, err := getVolumes(ec2Client)
-	if err != nil {
-		return fmt.Errorf("Error while fetching volumes: %v", err)
-
+func RemoveOldSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot, retentionStartDate time.Time, ec2Client *ec2.EC2) {
+	if lastSnapshot != nil && lastSnapshot.StartTime.Before(retentionStartDate) {
+		deleteSnapshot(ec2Client, lastSnapshot.SnapshotId)
+		return
 	}
+	log.Printf("old snapshot with id %s for volume %s has been deleted", *vol.VolumeId, *lastSnapshot.SnapshotId)
 
-	snaps, err := getSnapshots(ec2Client)
-	if err != nil {
-		return fmt.Errorf("Error while fetching snapshots: %v", err)
-	}
-	for _, config := range *snapshotConfigs {
-		key := config.Labels.Key
-		val := config.Labels.Value
-		acceptableStartTime := time.Now().Add(time.Duration(-config.IntervalSeconds) * time.Second)
-
-		for _, vol := range vols {
-			for _, tag := range vol.Tags {
-				if *tag.Key == key && *tag.Value == val {
-					log.Printf("Found volume %s matching tags %s=%s", *vol.VolumeId, key, val)
-					CheckSnapshot(vol, snaps[*vol.VolumeId], acceptableStartTime, ec2Client)
-					break
-				}
-			}
-		}
-	}
-	return nil
+	snapshotsDeleted.WithLabelValues(*vol.VolumeId, *lastSnapshot.SnapshotId).Inc()
 }
 
 func CreateEc2Client(awsAccessKey string, awsSecretKey string, ec2Region string) *ec2.EC2 {
@@ -190,6 +206,13 @@ func makeSnapshot(ec2Client *ec2.EC2, volume *ec2.Volume) error {
 	return err
 }
 
+func deleteSnapshot(ec2Client *ec2.EC2, snapshotId *string) error {
+	_, err := ec2Client.DeleteSnapshot(&ec2.DeleteSnapshotInput{
+		SnapshotId: snapshotId,
+	})
+	return err
+}
+
 func getSnapshots(ec2Client *ec2.EC2) (map[string]*ec2.Snapshot, error) {
 	maxResults := int64(1000)
 	snapshots := make([]*ec2.Snapshot, 0)
@@ -235,7 +258,7 @@ func getVolumes(ec2Client *ec2.EC2) (map[string]*ec2.Volume, error) {
 	for vols.NextToken != nil {
 		vols, err := ec2Client.DescribeVolumes(&ec2.DescribeVolumesInput{
 			MaxResults: &maxResults,
-			NextToken: vols.NextToken,
+			NextToken:  vols.NextToken,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("Error while describing volumes: %v", err)
