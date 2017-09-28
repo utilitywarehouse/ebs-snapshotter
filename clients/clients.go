@@ -20,8 +20,8 @@ type EBSClient struct {
 	snapshotsDeletedCounter *prometheus.CounterVec
 }
 
-func NewEBSClient(c *ec2.EC2, scc, sdc *prometheus.CounterVec) EBSClient {
-	return EBSClient{
+func NewEBSClient(c *ec2.EC2, scc, sdc *prometheus.CounterVec) *EBSClient {
+	return &EBSClient{
 		ec2Client:               c,
 		snapshotsCreatedCounter: scc,
 		snapshotsDeletedCounter: sdc,

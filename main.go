@@ -18,6 +18,7 @@ import (
 	"github.com/jawher/mow.cli"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/utilitywarehouse/ebs-snapshotter/clients"
 	"github.com/utilitywarehouse/go-operational/op"
 )
 
@@ -106,21 +107,27 @@ func main() {
 		snapshotConfigs := LoadVolumeSnapshotConfig(*volumeSnapshotConfigFile)
 		ec2Client := CreateEc2Client(*awsAccessKey, *awsSecretKey, *ec2Region)
 
+		ebsClient := clients.NewEBSClient(ec2Client, snapshotsCreated, snapshotsDeleted)
+
 		go initialiseHttpServer(*httpPort)
-		WatchSnapshots(*pollIntervalSeconds, *oldSnapshotsRetentionPeriod, ec2Client, snapshotConfigs)
+		WatchSnapshots(*pollIntervalSeconds, *oldSnapshotsRetentionPeriod, snapshotConfigs, ebsClient)
 	}
 	app.Run(os.Args)
 }
 
-func WatchSnapshots(intervalSeconds, retentionPeriod int, ec2Client *ec2.EC2, snapshotConfigs *VolumeSnapshotConfigs) {
+func WatchSnapshots(
+	intervalSeconds,
+	retentionPeriod int,
+	snapshotConfigs *VolumeSnapshotConfigs,
+	ebsClient clients.Client) {
+
 	for {
-		vols, err := getVolumes(ec2Client)
+		vols, err := ebsClient.GetVolumes()
 		if err != nil {
 			log.Printf("error while fetching volumes: %v", err)
-
 		}
 
-		snaps, err := getSnapshots(ec2Client)
+		snaps, err := ebsClient.GetSnapshots()
 		if err != nil {
 			log.Printf("error while fetching snapshots: %v", err)
 		}
@@ -136,14 +143,30 @@ func WatchSnapshots(intervalSeconds, retentionPeriod int, ec2Client *ec2.EC2, sn
 				for _, tag := range vol.Tags {
 					if *tag.Key == key && *tag.Value == val {
 						lastSnapshot := snaps[*vol.VolumeId]
-						err := CreateSnapshot(vol, lastSnapshot, acceptableStartTime, ec2Client)
+
+						if lastSnapshot != nil && !lastSnapshot.StartTime.Before(acceptableStartTime) && *lastSnapshot.State != "error" {
+							log.Printf("volume %s has an up to date snapshot", *vol.VolumeId)
+							continue
+						}
+						if err := ebsClient.CreateSnapshot(vol, lastSnapshot); err != nil {
+							log.Printf("error occured while creating snapshot: %v", err)
+							continue
+						}
+
+						if lastSnapshot == nil && lastSnapshot.StartTime.After(retentionStartDate) {
+							log.Printf(
+								"skiped snapshot removal, retention period not exceeded: "+
+									"volume - %s; snapshot - %s",
+								*vol.VolumeId,
+								lastSnapshot.SnapshotId)
+							continue
+						}
+						log.Printf("old snapshot with id %s for volume %s has been deleted", *vol.VolumeId, *lastSnapshot.SnapshotId)
 
 						// An error is an indication of a state that is not valid for old snapshot to be removed.
 						// This is done to avoid removing last remaining ebs snapshot in case of error.
-						if err == nil {
-							RemoveOldSnapshot(vol, lastSnapshot, retentionStartDate, ec2Client)
-						} else {
-							log.Printf("didn't remove old snapshot: %v", err)
+						if err := ebsClient.RemoveSnapshot(vol, lastSnapshot); err != nil {
+							log.Printf("failed to remove old snapshot: %v", err)
 						}
 					}
 				}
@@ -152,16 +175,6 @@ func WatchSnapshots(intervalSeconds, retentionPeriod int, ec2Client *ec2.EC2, sn
 		log.Print("finished checking volumes and snapshots")
 		<-time.After(time.Duration(intervalSeconds) * time.Second)
 	}
-}
-
-func RemoveOldSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot, retentionStartDate time.Time, ec2Client *ec2.EC2) {
-	if lastSnapshot != nil && lastSnapshot.StartTime.Before(retentionStartDate) {
-		deleteSnapshot(ec2Client, lastSnapshot.SnapshotId)
-		return
-	}
-	log.Printf("old snapshot with id %s for volume %s has been deleted", *vol.VolumeId, *lastSnapshot.SnapshotId)
-
-	snapshotsDeleted.WithLabelValues(*vol.VolumeId, *lastSnapshot.SnapshotId).Inc()
 }
 
 func CreateEc2Client(awsAccessKey string, awsSecretKey string, ec2Region string) *ec2.EC2 {
@@ -211,76 +224,6 @@ func makeSnapshot(ec2Client *ec2.EC2, volume *ec2.Volume) error {
 		Description: &desc,
 	})
 	return err
-}
-
-func deleteSnapshot(ec2Client *ec2.EC2, snapshotId *string) error {
-	_, err := ec2Client.DeleteSnapshot(&ec2.DeleteSnapshotInput{
-		SnapshotId: snapshotId,
-	})
-	return err
-}
-
-func getSnapshots(ec2Client *ec2.EC2) (map[string]*ec2.Snapshot, error) {
-	maxResults := int64(1000)
-	snapshots := make([]*ec2.Snapshot, 0)
-	snaps, err := ec2Client.DescribeSnapshots(&ec2.DescribeSnapshotsInput{MaxResults: &maxResults})
-	if err != nil {
-		return nil, fmt.Errorf("Error while describing volumes: %v", err)
-	}
-	snapshots = append(snapshots, snaps.Snapshots...)
-	for snaps.NextToken != nil {
-		snaps, err = ec2Client.DescribeSnapshots(&ec2.DescribeSnapshotsInput{
-			MaxResults: &maxResults,
-			NextToken:  snaps.NextToken,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("Error while describing volumes: %v", err)
-		}
-		snapshots = append(snapshots, snaps.Snapshots...)
-	}
-	return MapMostRecentSnapshotToVolumes(snapshots), nil
-}
-
-func MapMostRecentSnapshotToVolumes(snapshots []*ec2.Snapshot) map[string]*ec2.Snapshot {
-	output := make(map[string]*ec2.Snapshot)
-	for _, snapshot := range snapshots {
-		existingSnapshot := output[*snapshot.VolumeId]
-		if existingSnapshot == nil || existingSnapshot.StartTime.Before(*snapshot.StartTime) {
-			output[*snapshot.VolumeId] = snapshot
-		}
-	}
-	return output
-}
-
-func getVolumes(ec2Client *ec2.EC2) (map[string]*ec2.Volume, error) {
-	maxResults := int64(1000)
-	volumes := make([]*ec2.Volume, 0)
-	vols, err := ec2Client.DescribeVolumes(&ec2.DescribeVolumesInput{
-		MaxResults: &maxResults,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("Error while describing volumes: %v", err)
-	}
-	volumes = append(volumes, vols.Volumes...)
-	for vols.NextToken != nil {
-		vols, err := ec2Client.DescribeVolumes(&ec2.DescribeVolumesInput{
-			MaxResults: &maxResults,
-			NextToken:  vols.NextToken,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("Error while describing volumes: %v", err)
-		}
-		volumes = append(volumes, vols.Volumes...)
-	}
-	return MapVolumesToIds(volumes), nil
-}
-
-func MapVolumesToIds(volumes []*ec2.Volume) map[string]*ec2.Volume {
-	output := make(map[string]*ec2.Volume)
-	for _, vol := range volumes {
-		output[*vol.VolumeId] = vol
-	}
-	return output
 }
 
 func initialiseHttpServer(port int) {
