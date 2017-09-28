@@ -136,8 +136,15 @@ func WatchSnapshots(intervalSeconds, retentionPeriod int, ec2Client *ec2.EC2, sn
 				for _, tag := range vol.Tags {
 					if *tag.Key == key && *tag.Value == val {
 						lastSnapshot := snaps[*vol.VolumeId]
-						CheckSnapshot(vol, lastSnapshot, acceptableStartTime, ec2Client)
-						RemoveOldSnapshot(vol, lastSnapshot, retentionStartDate, ec2Client)
+						err := CreateSnapshot(vol, lastSnapshot, acceptableStartTime, ec2Client)
+
+						// An error is an indication of a state that is not valid for old snapshot to be removed.
+						// This is done to avoid removing last remaining ebs snapshot in case of error.
+						if err == nil {
+							RemoveOldSnapshot(vol, lastSnapshot, retentionStartDate, ec2Client)
+						} else {
+							log.Printf("didn't remove old snapshot: %v", err)
+						}
 					}
 				}
 			}
@@ -182,19 +189,19 @@ func LoadVolumeSnapshotConfig(volumeSnapshotConfigFile string) *VolumeSnapshotCo
 	return snapshotConfigs
 }
 
-func CheckSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot, acceptableStartTime time.Time, ec2Client *ec2.EC2) {
+func CreateSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot, acceptableStartTime time.Time, ec2Client *ec2.EC2) error {
 	if lastSnapshot != nil && !lastSnapshot.StartTime.Before(acceptableStartTime) && *lastSnapshot.State != "error" {
 		log.Printf("Volume %s has an up to date snapshot", *vol.VolumeId)
-		return
+		return fmt.Errorf("volume %s has an up to date snapshot", *vol.VolumeId)
 	}
 	err := makeSnapshot(ec2Client, vol)
 	if err != nil {
-		log.Printf("Error creating snapshot for volume %s: %v", *vol.VolumeId, err)
 		errors.Inc()
-		return
+		return fmt.Errorf("error creating snapshot for volume %s: %v", *vol.VolumeId, err)
 	}
-	log.Printf("Created snapshot for volume %s", *vol.VolumeId)
+	log.Printf("created snapshot for volume %s", *vol.VolumeId)
 	snapshotsCreated.WithLabelValues(*vol.VolumeId).Inc()
+	return nil
 }
 
 func makeSnapshot(ec2Client *ec2.EC2, volume *ec2.Volume) error {
