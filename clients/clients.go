@@ -3,7 +3,6 @@ package clients
 import (
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/pkg/errors"
-	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -18,16 +17,12 @@ type Client interface {
 }
 
 type EBSClient struct {
-	ec2Client               *ec2.EC2
-	snapshotsCreatedCounter *prometheus.CounterVec
-	snapshotsDeletedCounter *prometheus.CounterVec
+	ec2Client *ec2.EC2
 }
 
-func NewEBSClient(c *ec2.EC2, scc, sdc *prometheus.CounterVec) *EBSClient {
+func NewEBSClient(client *ec2.EC2) *EBSClient {
 	return &EBSClient{
-		ec2Client:               c,
-		snapshotsCreatedCounter: scc,
-		snapshotsDeletedCounter: sdc,
+		ec2Client: client,
 	}
 }
 
@@ -95,7 +90,6 @@ func (c *EBSClient) CreateSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot) 
 		return errors.Wrap(err, "error while creating a snapshot")
 	}
 	log.Printf("created snapshot for volume %s", *vol.VolumeId)
-	c.snapshotsCreatedCounter.WithLabelValues(*vol.VolumeId).Inc()
 
 	return nil
 }
@@ -107,7 +101,6 @@ func (c *EBSClient) RemoveSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot) 
 		return errors.Wrap(err, "error while removing a snapshot")
 	}
 	log.Printf("old snapshot with id %s for volume %s has been deleted", *vol.VolumeId, *lastSnapshot.SnapshotId)
-	c.snapshotsDeletedCounter.WithLabelValues(*vol.VolumeId, *lastSnapshot.SnapshotId).Inc()
 
 	return nil
 }

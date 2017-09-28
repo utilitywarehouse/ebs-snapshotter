@@ -23,12 +23,12 @@ import (
 )
 
 var (
-	gitHash          string = ""
-	NAME                    = "ebs-snapshotter"
-	DESC                    = `Snapshots EBS volumes automatically`
-	snapshotsCreated *prometheus.CounterVec
-	snapshotsDeleted *prometheus.CounterVec
-	errors           prometheus.Counter
+	gitHash        string = ""
+	NAME                  = "ebs-snapshotter"
+	DESC                  = `Snapshots EBS volumes automatically`
+	createdCounter *prometheus.CounterVec
+	deletedCounter *prometheus.CounterVec
+	errors         prometheus.Counter
 )
 
 type VolumeSnapshotConfigs []*VolumeSnapshotConfig
@@ -88,11 +88,11 @@ func main() {
 		Value:  168,
 	})
 
-	snapshotsCreated = prometheus.NewCounterVec(prometheus.CounterOpts{
+	createdCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "snapshots_performed",
 		Help: "A counter of the total number of snapshots created",
 	}, []string{"volumeId"})
-	snapshotsDeleted = prometheus.NewCounterVec(prometheus.CounterOpts{
+	deletedCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "old_snapshots_removed",
 		Help: "A counter of the total number of old snapshots removed",
 	}, []string{"volumeId", "snapshotId"})
@@ -101,25 +101,31 @@ func main() {
 		Help: "A counter of the total number of errors encountered",
 	})
 
-	prometheus.DefaultRegisterer.MustRegister(snapshotsCreated, snapshotsDeleted, errors)
+	prometheus.DefaultRegisterer.MustRegister(createdCounter, deletedCounter, errors)
 
 	app.Action = func() {
 		snapshotConfigs := LoadVolumeSnapshotConfig(*volumeSnapshotConfigFile)
 		ec2Client := CreateEc2Client(*awsAccessKey, *awsSecretKey, *ec2Region)
 
-		ebsClient := clients.NewEBSClient(ec2Client, snapshotsCreated, snapshotsDeleted)
+		ebsClient := clients.NewEBSClient(ec2Client)
 
 		go initialiseHttpServer(*httpPort)
-		WatchSnapshots(*pollIntervalSeconds, *oldSnapshotsRetentionPeriod, snapshotConfigs, ebsClient)
+		WatchSnapshots(
+			*pollIntervalSeconds,
+			*oldSnapshotsRetentionPeriod,
+			snapshotConfigs,
+			ebsClient,
+			createdCounter,
+			deletedCounter)
 	}
 	app.Run(os.Args)
 }
 
 func WatchSnapshots(
-	intervalSeconds,
-	retentionPeriod int,
+	intervalSeconds, retentionPeriod int,
 	snapshotConfigs *VolumeSnapshotConfigs,
-	ebsClient clients.Client) {
+	ebsClient clients.Client,
+	createdCounter, deletedCounter *prometheus.CounterVec) {
 
 	for {
 		vols, err := ebsClient.GetVolumes()
@@ -152,6 +158,8 @@ func WatchSnapshots(
 							log.Printf("error occured while creating snapshot: %v", err)
 							continue
 						}
+						log.Printf("new snapshot created for volume %s", *vol.VolumeId)
+						createdCounter.WithLabelValues(*vol.VolumeId).Inc()
 
 						if lastSnapshot == nil && lastSnapshot.StartTime.After(retentionStartDate) {
 							log.Printf(
@@ -161,6 +169,7 @@ func WatchSnapshots(
 								lastSnapshot.SnapshotId)
 							continue
 						}
+						deletedCounter.WithLabelValues(*vol.VolumeId, *lastSnapshot.SnapshotId).Inc()
 						log.Printf("old snapshot with id %s for volume %s has been deleted", *vol.VolumeId, *lastSnapshot.SnapshotId)
 
 						// An error is an indication of a state that is not valid for old snapshot to be removed.
@@ -213,7 +222,7 @@ func CreateSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot, acceptableStart
 		return fmt.Errorf("error creating snapshot for volume %s: %v", *vol.VolumeId, err)
 	}
 	log.Printf("created snapshot for volume %s", *vol.VolumeId)
-	snapshotsCreated.WithLabelValues(*vol.VolumeId).Inc()
+	createdCounter.WithLabelValues(*vol.VolumeId).Inc()
 	return nil
 }
 
