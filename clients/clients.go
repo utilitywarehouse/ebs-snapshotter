@@ -5,26 +5,33 @@ import (
 	"github.com/pkg/errors"
 )
 
+// EC2Volumes is type alias for EC2 Volume map
 type EC2Volumes map[string]*ec2.Volume
+
+// EC2Snapshots is type alias for EC2 Snapshot map
 type EC2Snapshots map[string]*ec2.Snapshot
 
+// Client interface specifies EBS client functions
 type Client interface {
 	GetVolumes() (EC2Volumes, error)
 	GetSnapshots() (EC2Snapshots, error)
-	CreateSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot) error
-	RemoveSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot) error
+	CreateSnapshot(volume *ec2.Volume) error
+	RemoveSnapshot(snapshot *ec2.Snapshot) error
 }
 
+// EBSClient is used to interact with AWS EC2 to process EBS snapshots
 type EBSClient struct {
 	ec2Client *ec2.EC2
 }
 
+// NewEBSClient used to create a new EBS client instance
 func NewEBSClient(client *ec2.EC2) *EBSClient {
 	return &EBSClient{
 		ec2Client: client,
 	}
 }
 
+// GetVolumes used to obtain EC2 volumes
 func (c *EBSClient) GetVolumes() (EC2Volumes, error) {
 	maxResults := int64(1000)
 	volumes := make([]*ec2.Volume, 0)
@@ -39,19 +46,20 @@ func (c *EBSClient) GetVolumes() (EC2Volumes, error) {
 
 	volumes = append(volumes, vols.Volumes...)
 	for vols.NextToken != nil {
-		vols, err := c.ec2Client.DescribeVolumes(&ec2.DescribeVolumesInput{
+		v, err := c.ec2Client.DescribeVolumes(&ec2.DescribeVolumesInput{
 			MaxResults: &maxResults,
 			NextToken:  vols.NextToken,
 		})
 		if err != nil {
 			return nil, errors.Wrap(err, "error while describing volumes")
 		}
-		volumes = append(volumes, vols.Volumes...)
+		volumes = append(volumes, v.Volumes...)
 	}
 
 	return mapVolumesToIds(volumes), nil
 }
 
+// GetSnapshots used to obtain EC2 EBS snapshots
 func (c *EBSClient) GetSnapshots() (EC2Snapshots, error) {
 	maxResults := int64(1000)
 	snapshots := make([]*ec2.Snapshot, 0)
@@ -78,10 +86,11 @@ func (c *EBSClient) GetSnapshots() (EC2Snapshots, error) {
 	return mapMostRecentSnapshotToVolumes(snapshots), nil
 }
 
-func (c *EBSClient) CreateSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot) error {
+// CreateSnapshot used to create a new EC2 EBS snapshot for given volume
+func (c *EBSClient) CreateSnapshot(volume *ec2.Volume) error {
 	desc := string("Created by ebs-snapshotter")
 	input := &ec2.CreateSnapshotInput{
-		VolumeId:    vol.VolumeId,
+		VolumeId:    volume.VolumeId,
 		Description: &desc,
 	}
 
@@ -92,9 +101,10 @@ func (c *EBSClient) CreateSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot) 
 	return nil
 }
 
-func (c *EBSClient) RemoveSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot) error {
+// RemoveSnapshot used to remove EC2 EBS snapshot
+func (c *EBSClient) RemoveSnapshot(snapshot *ec2.Snapshot) error {
 	if _, err := c.ec2Client.DeleteSnapshot(&ec2.DeleteSnapshotInput{
-		SnapshotId: lastSnapshot.SnapshotId,
+		SnapshotId: snapshot.SnapshotId,
 	}); err != nil {
 		return errors.Wrap(err, "error while removing a snapshot")
 	}

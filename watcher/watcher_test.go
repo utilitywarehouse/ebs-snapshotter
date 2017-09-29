@@ -4,14 +4,14 @@ import (
 	"errors"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/utilitywarehouse/ebs-snapshotter/clients"
 	"github.com/utilitywarehouse/ebs-snapshotter/models"
 	w "github.com/utilitywarehouse/ebs-snapshotter/watcher"
 	. "gopkg.in/check.v1"
 	"testing"
 	"time"
-	"github.com/sirupsen/logrus/hooks/test"
-	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -21,8 +21,8 @@ const (
 var _ = Suite(&WatcherSuite{})
 
 var (
-	createdCounter  *prometheus.CounterVec
-	deletedCounter  *prometheus.CounterVec
+	createdCounter *prometheus.CounterVec
+	deletedCounter *prometheus.CounterVec
 
 	ec2Volumes   clients.EC2Volumes
 	ec2Snapshots clients.EC2Snapshots
@@ -314,16 +314,16 @@ func createFakeVolume(snapshotId, volumeId, tagKey, tagValue string) *ec2.Volume
 func createFakeSnapshot(startTime time.Time, snapshotID, snapshotState string) *ec2.Snapshot {
 	return &ec2.Snapshot{
 		SnapshotId: &snapshotID,
-		StartTime: &startTime,
-		State:     &snapshotState,
+		StartTime:  &startTime,
+		State:      &snapshotState,
 	}
 }
 
 type Client interface {
 	GetVolumes() (clients.EC2Volumes, error)
 	GetSnapshots() (clients.EC2Snapshots, error)
-	CreateSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot) error
-	RemoveSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot) error
+	CreateSnapshot(volume *ec2.Volume) error
+	RemoveSnapshot(snapshot *ec2.Snapshot) error
 }
 
 type MockClient struct{}
@@ -336,10 +336,10 @@ func (c *MockClient) GetSnapshots() (clients.EC2Snapshots, error) {
 	return ec2Snapshots, snapshotsErrorOnGet
 }
 
-func (c *MockClient) CreateSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot) error {
+func (c *MockClient) CreateSnapshot(volume *ec2.Volume) error {
 	return SnapshotErrorOnCreate
 }
 
-func (c *MockClient) RemoveSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot) error {
+func (c *MockClient) RemoveSnapshot(snapshot *ec2.Snapshot) error {
 	return snapshotErrorOnRemove
 }

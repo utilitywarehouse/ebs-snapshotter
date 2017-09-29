@@ -1,4 +1,4 @@
-package ebs_snapshotter
+package main
 
 import (
 	"encoding/json"
@@ -23,17 +23,20 @@ import (
 	"time"
 )
 
+const (
+	name        = "ebs-snapshotter"
+	description = `Snapshots EBS volumes automatically`
+)
+
 var (
-	gitHash        string = ""
-	NAME                  = "ebs-snapshotter"
-	DESC                  = `Snapshots EBS volumes automatically`
+	gitHash        string
 	createdCounter *prometheus.CounterVec
 	deletedCounter *prometheus.CounterVec
 	errors         prometheus.Counter
 )
 
 func main() {
-	app := cli.App(NAME, DESC)
+	app := cli.App(name, description)
 	httpPort := app.Int(cli.IntOpt{
 		Name:   "http-port",
 		Desc:   "HTTP port to listen on ",
@@ -93,8 +96,8 @@ func main() {
 	prometheus.DefaultRegisterer.MustRegister(createdCounter, deletedCounter, errors)
 
 	app.Action = func() {
-		snapshotConfigs := LoadVolumeSnapshotConfig(*volumeSnapshotConfigFile)
-		ec2Client := CreateEc2Client(*awsAccessKey, *awsSecretKey, *ec2Region)
+		snapshotConfigs := loadVolumeSnapshotConfig(*volumeSnapshotConfigFile)
+		ec2Client := createEc2Client(*awsAccessKey, *awsSecretKey, *ec2Region)
 
 		ebsClient := clients.NewEBSClient(ec2Client)
 
@@ -105,7 +108,7 @@ func main() {
 			deletedCounter,
 		)
 
-		go initialiseHttpServer(*httpPort)
+		go initialiseHTTPServer(*httpPort)
 		for {
 			watcher.WatchSnapshots(snapshotConfigs)
 			<-time.After(time.Duration(*pollIntervalSeconds) * time.Second)
@@ -114,7 +117,7 @@ func main() {
 	app.Run(os.Args)
 }
 
-func CreateEc2Client(awsAccessKey string, awsSecretKey string, ec2Region string) *ec2.EC2 {
+func createEc2Client(awsAccessKey string, awsSecretKey string, ec2Region string) *ec2.EC2 {
 	config := aws.NewConfig()
 	config.WithCredentials(credentials.NewStaticCredentials(awsAccessKey, awsSecretKey, "")).
 		WithRegion(ec2Region)
@@ -123,7 +126,7 @@ func CreateEc2Client(awsAccessKey string, awsSecretKey string, ec2Region string)
 	return ec2Client
 }
 
-func LoadVolumeSnapshotConfig(volumeSnapshotConfigFile string) *models.VolumeSnapshotConfigs {
+func loadVolumeSnapshotConfig(volumeSnapshotConfigFile string) *models.VolumeSnapshotConfigs {
 	confFile, err := os.Open(volumeSnapshotConfigFile)
 	if err != nil {
 		log.Fatalf("Error while opening volume snapshot config file: %v", err)
@@ -139,7 +142,7 @@ func LoadVolumeSnapshotConfig(volumeSnapshotConfigFile string) *models.VolumeSna
 	return snapshotConfigs
 }
 
-func initialiseHttpServer(port int) {
+func initialiseHTTPServer(port int) {
 	router := mux.NewRouter()
 
 	router.NewRoute().PathPrefix("/__/").
@@ -157,7 +160,7 @@ func initialiseHttpServer(port int) {
 
 func getOpHandler() http.Handler {
 	return op.NewHandler(
-		op.NewStatus(NAME, DESC).
+		op.NewStatus(name, description).
 			AddOwner("telecom", "#telecom").
 			SetRevision(gitHash).
 			ReadyUseHealthCheck().
