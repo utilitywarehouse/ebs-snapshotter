@@ -308,6 +308,71 @@ func (s *WatcherSuite) TestIfOldSnapshotNotDeletedWhileRemovingOldSnapshotEncoun
 	c.Assert(hook.Entries[3].Message, Equals, "finished checking volumes and snapshots")
 }
 
+func (s *WatcherSuite) TestOnlyOldSnapshotDeletedWhenRetentionPeriodExceeded(c *C) {
+	hook := test.NewGlobal()
+
+	intervalSeconds := int64(11)
+	config := models.VolumeSnapshotConfigs{
+		{
+			Labels: models.Label{
+				Key:   "test-key-1",
+				Value: "test-value-1",
+			},
+			IntervalSeconds:      intervalSeconds,
+			RetentionPeriodHours: retentionPeriod,
+		},
+	}
+
+	volumeID := "volume-1"
+	ec2Volumes = clients.EC2Volumes{
+		"test-key-1": createFakeVolume("snapshot-1", volumeID, "test-key-1", "test-value-1"),
+	}
+	snapshotIDOne := "snapshot-1"
+	snapshotIDTwo := "snapshot-2"
+	snapshotState := "ok"
+	retentionExceeded := time.Now().Add(time.Duration(-(retentionPeriod)) * time.Hour)
+	retentionNotExceeded := time.Now().Add(time.Duration(-(retentionPeriod - 1)) * time.Hour)
+	ec2Snapshots = clients.EC2Snapshots{
+		volumeID: []*ec2.Snapshot{
+			{
+				SnapshotId: &snapshotIDOne,
+				StartTime:  &retentionExceeded,
+				State:      &snapshotState,
+			},
+			{
+				SnapshotId: &snapshotIDTwo,
+				StartTime:  &retentionNotExceeded,
+				State:      &snapshotState,
+			},
+		},
+	}
+
+	snapshotsErrorOnGet = nil
+	volumesErrorOnGet = nil
+
+	SnapshotErrorOnCreate = nil
+	volumesErrorOnGet = nil
+	snapshotErrorOnRemove = nil
+
+	s.watcher.WatchSnapshots(&config)
+
+	c.Assert(len(hook.Entries), Equals, 5)
+	c.Assert(hook.Entries[0].Level, Equals, logrus.InfoLevel)
+	c.Assert(hook.Entries[0].Message, Equals, "checking volumes and snapshots")
+
+	c.Assert(hook.Entries[1].Level, Equals, logrus.InfoLevel)
+	c.Assert(hook.Entries[1].Message, Equals, "created a new snapshot for volume volume-1")
+
+	c.Assert(hook.Entries[2].Level, Equals, logrus.InfoLevel)
+	c.Assert(hook.Entries[2].Message, Equals, "old snapshot with id snapshot-1 for volume volume-1 has been deleted")
+
+	c.Assert(hook.Entries[3].Level, Equals, logrus.InfoLevel)
+	c.Assert(hook.Entries[3].Message, Equals, "skipped snapshot removal, retention period not exceeded: volume - volume-1; snapshot - snapshot-2")
+
+	c.Assert(hook.Entries[4].Level, Equals, logrus.InfoLevel)
+	c.Assert(hook.Entries[4].Message, Equals, "finished checking volumes and snapshots")
+}
+
 func createFakeVolume(snapshotId, volumeId, tagKey, tagValue string) *ec2.Volume {
 	return &ec2.Volume{
 		SnapshotId: &snapshotId,
@@ -321,11 +386,13 @@ func createFakeVolume(snapshotId, volumeId, tagKey, tagValue string) *ec2.Volume
 	}
 }
 
-func createFakeSnapshot(startTime time.Time, snapshotID, snapshotState string) *ec2.Snapshot {
-	return &ec2.Snapshot{
-		SnapshotId: &snapshotID,
-		StartTime:  &startTime,
-		State:      &snapshotState,
+func createFakeSnapshot(startTime time.Time, snapshotID, snapshotState string) []*ec2.Snapshot {
+	return []*ec2.Snapshot{
+		{
+			SnapshotId: &snapshotID,
+			StartTime:  &startTime,
+			State:      &snapshotState,
+		},
 	}
 }
 

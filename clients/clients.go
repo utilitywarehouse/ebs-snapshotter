@@ -13,7 +13,7 @@ var (
 type EC2Volumes map[string]*ec2.Volume
 
 // EC2Snapshots is type alias for EC2 Snapshot map
-type EC2Snapshots map[string]*ec2.Snapshot
+type EC2Snapshots map[string][]*ec2.Snapshot
 
 // EBSClient interface specifies EBS client functions
 type EBSClient interface {
@@ -61,7 +61,7 @@ func (c *ebsClient) GetVolumes() (EC2Volumes, error) {
 	return mapVolumesToIds(volumes), nil
 }
 
-// GetSnapshots used to obtain EC2 EBS snapshots
+// GetLatestSnapshots used to obtain recent EC2 EBS snapshots
 func (c *ebsClient) GetSnapshots() (EC2Snapshots, error) {
 	snapshots := make([]*ec2.Snapshot, 0)
 
@@ -84,7 +84,7 @@ func (c *ebsClient) GetSnapshots() (EC2Snapshots, error) {
 		snapshots = append(snapshots, snaps.Snapshots...)
 	}
 
-	return mapMostRecentSnapshotToVolumes(snapshots), nil
+	return mapSnapshotsToVolumes(snapshots), nil
 }
 
 // CreateSnapshot used to create a new EC2 EBS snapshot for given volume
@@ -121,13 +121,16 @@ func mapVolumesToIds(volumes []*ec2.Volume) EC2Volumes {
 	return output
 }
 
-func mapMostRecentSnapshotToVolumes(snapshots []*ec2.Snapshot) EC2Snapshots {
+func mapSnapshotsToVolumes(snapshots []*ec2.Snapshot) EC2Snapshots {
 	output := make(EC2Snapshots)
 	for _, snapshot := range snapshots {
-		existingSnapshot := output[*snapshot.VolumeId]
-		if existingSnapshot == nil || existingSnapshot.StartTime.Before(*snapshot.StartTime) {
-			output[*snapshot.VolumeId] = snapshot
+		switch {
+		case output[*snapshot.VolumeId] == nil:
+			output[*snapshot.VolumeId] = []*ec2.Snapshot{snapshot}
+		default:
+			output[*snapshot.VolumeId] = append(output[*snapshot.VolumeId], snapshot)
 		}
+
 	}
 	return output
 }

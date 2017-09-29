@@ -55,17 +55,21 @@ func (w *EBSSnapshotWatcher) WatchSnapshots(config *models.VolumeSnapshotConfigs
 		acceptableStartTime := time.Now().Add(time.Duration(-config.IntervalSeconds) * time.Second)
 		for _, volume := range volumes {
 			for _, tag := range volume.Tags {
-				if *tag.Key == key && *tag.Value == val {
-					lastSnapshot := snapshots[*volume.VolumeId]
-
-					if err := createNewEBSSnapshot(w, lastSnapshot, volume, acceptableStartTime); err != nil {
+				if *tag.Key == key && *tag.Value == val && len(snapshots[*volume.VolumeId]) > 0 {
+					latestSnapshot := snapshots[*volume.VolumeId][0]
+					if err := createNewEBSSnapshot(w, latestSnapshot, volume, acceptableStartTime); err != nil {
 						log.WithError(err).Error("error occurred while creating a new snapshot")
 						continue
 					}
-					removeOldEBSSnapshot(w, lastSnapshot, volume, retentionStartDate)
+
+					// Removing all old snapshots for given volume
+					for _, snapshot := range snapshots[*volume.VolumeId] {
+						removeOldEBSSnapshot(w, snapshot, volume, retentionStartDate)
+					}
 				}
 			}
 		}
+
 	}
 	log.Info("finished checking volumes and snapshots")
 	return nil
