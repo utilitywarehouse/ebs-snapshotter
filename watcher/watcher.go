@@ -1,12 +1,13 @@
 package watcher
 
 import (
+	"time"
+
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"github.com/utilitywarehouse/ebs-snapshotter/clients"
 	"github.com/utilitywarehouse/ebs-snapshotter/models"
-	"time"
 )
 
 // Watcher interface specifies EBS snapshot watcher functions
@@ -16,22 +17,19 @@ type Watcher interface {
 
 // EBSSnapshotWatcher used to check EC2 EBS snapshots
 type EBSSnapshotWatcher struct {
-	retentionPeriod                int
 	ebsClient                      clients.EBSClient
 	createdCounter, deletedCounter *prometheus.CounterVec
 }
 
 // NewEBSSnapshotWatcher used to create a new instance of EBS snapshot watcher
 func NewEBSSnapshotWatcher(
-	retentionPeriod int,
 	ebsClient clients.EBSClient,
 	createdCounter, deletedCounter *prometheus.CounterVec) *EBSSnapshotWatcher {
 
 	return &EBSSnapshotWatcher{
-		retentionPeriod: retentionPeriod,
-		ebsClient:       ebsClient,
-		createdCounter:  createdCounter,
-		deletedCounter:  deletedCounter,
+		ebsClient:      ebsClient,
+		createdCounter: createdCounter,
+		deletedCounter: deletedCounter,
 	}
 }
 
@@ -48,8 +46,8 @@ func (w *EBSSnapshotWatcher) WatchSnapshots(config *models.VolumeSnapshotConfigs
 	}
 
 	log.Info("checking volumes and snapshots")
-	retentionStartDate := time.Now().Add(-time.Duration(w.retentionPeriod) * time.Hour)
 	for _, config := range *config {
+		retentionStartDate := time.Now().Add(-time.Duration(config.RetentionPeriodHours) * time.Hour)
 		key := config.Labels.Key
 		val := config.Labels.Value
 

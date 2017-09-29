@@ -5,8 +5,9 @@ type VolumeSnapshotConfigs []*VolumeSnapshotConfig
 
 // VolumeSnapshotConfig used to store volume snapshot configuration details
 type VolumeSnapshotConfig struct {
-	Labels          Label `json:"labels"`
-	IntervalSeconds int64 `json:"intervalSeconds"`
+	Labels               Label `json:"labels"`
+	IntervalSeconds      int64 `json:"intervalSeconds"`
+	RetentionPeriodHours int64 `json:"retentionPeriodHours"`
 }
 
 // Label used to store volume and snapshot information

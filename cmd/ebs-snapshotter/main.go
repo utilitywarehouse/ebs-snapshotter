@@ -74,12 +74,6 @@ func main() {
 		EnvVar: "AWS_REGION",
 		Value:  "eu-west-1",
 	})
-	oldSnapshotsRetentionPeriod := app.Int(cli.IntOpt{
-		Name:   "old-snapshots-retention-period-hours",
-		Desc:   "Specifies for how long time period to retain the old EBS snapshots",
-		EnvVar: "OLD_SNAPSHOTS_RETENTION_PERIOD_HOURS",
-		Value:  168,
-	})
 
 	createdCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "snapshots_performed",
@@ -103,7 +97,6 @@ func main() {
 		ebsClient := clients.NewEBSClient(ec2Client)
 
 		watcher := w.NewEBSSnapshotWatcher(
-			*oldSnapshotsRetentionPeriod,
 			ebsClient,
 			createdCounter,
 			deletedCounter,

@@ -2,6 +2,9 @@ package watcher_test
 
 import (
 	"errors"
+	"testing"
+	"time"
+
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
@@ -10,12 +13,10 @@ import (
 	"github.com/utilitywarehouse/ebs-snapshotter/models"
 	w "github.com/utilitywarehouse/ebs-snapshotter/watcher"
 	. "gopkg.in/check.v1"
-	"testing"
-	"time"
 )
 
-const (
-	retentionPeriod = 10
+var (
+	retentionPeriod = int64(10)
 )
 
 var _ = Suite(&WatcherSuite{})
@@ -50,7 +51,6 @@ func (s *WatcherSuite) SetUpSuite(c *C) {
 	}, []string{"volumeId", "snapshotId"})
 
 	s.watcher = w.NewEBSSnapshotWatcher(
-		retentionPeriod,
 		&MockClient{},
 		createdCounter,
 		deletedCounter,
@@ -89,7 +89,8 @@ func (s *WatcherSuite) TestIfUpToDateSnapshotIsIgnored(c *C) {
 				Key:   "test-key-1",
 				Value: "test-value-1",
 			},
-			IntervalSeconds: intervalSeconds,
+			IntervalSeconds:      intervalSeconds,
+			RetentionPeriodHours: retentionPeriod,
 		},
 	}
 
@@ -126,7 +127,8 @@ func (s *WatcherSuite) TestIfOldSnapshotNotDeletedOnCreateNewSnapshotError(c *C)
 				Key:   "test-key-1",
 				Value: "test-value-1",
 			},
-			IntervalSeconds: intervalSeconds,
+			IntervalSeconds:      intervalSeconds,
+			RetentionPeriodHours: retentionPeriod,
 		},
 	}
 
@@ -170,7 +172,8 @@ func (s *WatcherSuite) TestIfOldSnapshotNotDeletedWhenRetentionPeriodNotExceeded
 				Key:   "test-key-1",
 				Value: "test-value-1",
 			},
-			IntervalSeconds: intervalSeconds,
+			IntervalSeconds:      intervalSeconds,
+			RetentionPeriodHours: retentionPeriod,
 		},
 	}
 
@@ -215,7 +218,8 @@ func (s *WatcherSuite) TestIfOldSnapshotDeletedWhenRetentionPeriodExceeded(c *C)
 				Key:   "test-key-1",
 				Value: "test-value-1",
 			},
-			IntervalSeconds: intervalSeconds,
+			IntervalSeconds:      intervalSeconds,
+			RetentionPeriodHours: retentionPeriod,
 		},
 	}
 
@@ -260,7 +264,8 @@ func (s *WatcherSuite) TestIfOldSnapshotNotDeletedWhileRemovingOldSnapshotEncoun
 				Key:   "test-key-1",
 				Value: "test-value-1",
 			},
-			IntervalSeconds: intervalSeconds,
+			IntervalSeconds:      intervalSeconds,
+			RetentionPeriodHours: retentionPeriod,
 		},
 	}
 
