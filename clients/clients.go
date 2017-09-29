@@ -5,6 +5,10 @@ import (
 	"github.com/pkg/errors"
 )
 
+var (
+	resultsPerRequest = int64(1000)
+)
+
 // EC2Volumes is type alias for EC2 Volume map
 type EC2Volumes map[string]*ec2.Volume
 
@@ -32,10 +36,9 @@ func NewEBSClient(client *ec2.EC2) EBSClient {
 
 // GetVolumes used to obtain EC2 volumes
 func (c *ebsClient) GetVolumes() (EC2Volumes, error) {
-	maxResults := int64(1000)
 	volumes := make([]*ec2.Volume, 0)
 	input := &ec2.DescribeVolumesInput{
-		MaxResults: &maxResults,
+		MaxResults: &resultsPerRequest,
 	}
 
 	vols, err := c.ec2Client.DescribeVolumes(input)
@@ -46,7 +49,7 @@ func (c *ebsClient) GetVolumes() (EC2Volumes, error) {
 	volumes = append(volumes, vols.Volumes...)
 	for vols.NextToken != nil {
 		v, err := c.ec2Client.DescribeVolumes(&ec2.DescribeVolumesInput{
-			MaxResults: &maxResults,
+			MaxResults: &resultsPerRequest,
 			NextToken:  vols.NextToken,
 		})
 		if err != nil {
@@ -60,11 +63,10 @@ func (c *ebsClient) GetVolumes() (EC2Volumes, error) {
 
 // GetSnapshots used to obtain EC2 EBS snapshots
 func (c *ebsClient) GetSnapshots() (EC2Snapshots, error) {
-	maxResults := int64(1000)
 	snapshots := make([]*ec2.Snapshot, 0)
 
 	snaps, err := c.ec2Client.DescribeSnapshots(&ec2.DescribeSnapshotsInput{
-		MaxResults: &maxResults,
+		MaxResults: &resultsPerRequest,
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "error while describing snapshots")
@@ -73,7 +75,7 @@ func (c *ebsClient) GetSnapshots() (EC2Snapshots, error) {
 	snapshots = append(snapshots, snaps.Snapshots...)
 	for snaps.NextToken != nil {
 		snaps, err = c.ec2Client.DescribeSnapshots(&ec2.DescribeSnapshotsInput{
-			MaxResults: &maxResults,
+			MaxResults: &resultsPerRequest,
 			NextToken:  snaps.NextToken,
 		})
 		if err != nil {
