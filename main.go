@@ -211,30 +211,6 @@ func LoadVolumeSnapshotConfig(volumeSnapshotConfigFile string) *VolumeSnapshotCo
 	return snapshotConfigs
 }
 
-func CreateSnapshot(vol *ec2.Volume, lastSnapshot *ec2.Snapshot, acceptableStartTime time.Time, ec2Client *ec2.EC2) error {
-	if lastSnapshot != nil && !lastSnapshot.StartTime.Before(acceptableStartTime) && *lastSnapshot.State != "error" {
-		log.Printf("Volume %s has an up to date snapshot", *vol.VolumeId)
-		return fmt.Errorf("volume %s has an up to date snapshot", *vol.VolumeId)
-	}
-	err := makeSnapshot(ec2Client, vol)
-	if err != nil {
-		errors.Inc()
-		return fmt.Errorf("error creating snapshot for volume %s: %v", *vol.VolumeId, err)
-	}
-	log.Printf("created snapshot for volume %s", *vol.VolumeId)
-	createdCounter.WithLabelValues(*vol.VolumeId).Inc()
-	return nil
-}
-
-func makeSnapshot(ec2Client *ec2.EC2, volume *ec2.Volume) error {
-	desc := string("Created by ebs-snapshotter")
-	_, err := ec2Client.CreateSnapshot(&ec2.CreateSnapshotInput{
-		VolumeId:    volume.VolumeId,
-		Description: &desc,
-	})
-	return err
-}
-
 func initialiseHttpServer(port int) {
 	router := mux.NewRouter()
 
