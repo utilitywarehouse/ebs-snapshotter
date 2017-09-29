@@ -4,7 +4,7 @@ base_dir := $(notdir $(patsubst %/,%,$(dir $(mkfile_path))))
 SERVICE ?= $(base_dir)
 
 DOCKER_REGISTRY=registry.uw.systems
-DOCKER_REPOSITORY_NAMESPACE=telecom
+DOCKER_REPOSITORY_NAMESPACE=system
 DOCKER_ID=telco
 DOCKER_REPOSITORY_IMAGE=$(SERVICE)
 DOCKER_REPOSITORY=registry.uw.systems/$(DOCKER_REPOSITORY_NAMESPACE)/$(DOCKER_REPOSITORY_IMAGE)

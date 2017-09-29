@@ -35,9 +35,7 @@ workflows:
           filters:
             branches:
               ignore: master
+      - deploy
   deployment:
     jobs:
-      - deploy:
-          filters:
-            branches:
-              only: master
+      - deploy
