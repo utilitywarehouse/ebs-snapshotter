@@ -3,6 +3,7 @@ package watcher
 import (
 	"time"
 
+	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
@@ -57,43 +58,61 @@ func (w *EBSSnapshotWatcher) WatchSnapshots(config *models.VolumeSnapshotConfigs
 				if *tag.Key == key && *tag.Value == val {
 					lastSnapshot := snapshots[*volume.VolumeId]
 
-					if lastSnapshot != nil && !lastSnapshot.StartTime.Before(acceptableStartTime) &&
-						*lastSnapshot.State != "error" {
-
-						log.Infof("volume %s has an up to date snapshot", *volume.VolumeId)
+					if err := createNewEBSSnapshot(w, lastSnapshot, volume, acceptableStartTime); err != nil {
+						log.WithError(err).Error("error occurred while creating a new snapshot")
 						continue
 					}
-					if err := w.ebsClient.CreateSnapshot(volume); err != nil {
-						log.WithError(err).Error("error occurred while creating snapshot")
-						continue
-					}
-					log.Infof("created snapshot for volume %s", *volume.VolumeId)
-					w.createdCounter.WithLabelValues(*volume.VolumeId).Inc()
-
-					if lastSnapshot != nil && lastSnapshot.StartTime.After(retentionStartDate) {
-						log.Infof(
-							"skipped snapshot removal, retention period not exceeded: "+
-								"volume - %s; snapshot - %s",
-							*volume.VolumeId,
-							*lastSnapshot.SnapshotId)
-						continue
-					}
-
-					// An error is an indication of a state that is not valid for old snapshot to be removed.
-					// This is done to avoid removing last remaining ebs snapshot in case of error.
-					if err := w.ebsClient.RemoveSnapshot(lastSnapshot); err != nil {
-						log.WithError(err).Error("failed to remove old snapshot")
-						continue
-					}
-
-					w.deletedCounter.WithLabelValues(*volume.VolumeId, *lastSnapshot.SnapshotId).Inc()
-					log.Infof(
-						"old snapshot with id %s for volume %s has been deleted",
-						*lastSnapshot.SnapshotId, *volume.VolumeId)
+					removeOldEBSSnapshot(w, lastSnapshot, volume, retentionStartDate)
 				}
 			}
 		}
 	}
 	log.Info("finished checking volumes and snapshots")
 	return nil
+}
+
+func createNewEBSSnapshot(
+	w *EBSSnapshotWatcher,
+	snapshot *ec2.Snapshot,
+	volume *ec2.Volume,
+	acceptableStartTime time.Time) error {
+
+	if snapshot != nil && !snapshot.StartTime.Before(acceptableStartTime) && *snapshot.State != "error" {
+		log.Debugf("volume %s has an up to date snapshot", *volume.VolumeId)
+		return nil
+	}
+	if err := w.ebsClient.CreateSnapshot(volume); err != nil {
+		return err
+	}
+	log.Infof("created a new snapshot for volume %s", *volume.VolumeId)
+	w.createdCounter.WithLabelValues(*volume.VolumeId).Inc()
+	return nil
+}
+
+func removeOldEBSSnapshot(
+	w *EBSSnapshotWatcher,
+	snapshot *ec2.Snapshot,
+	volume *ec2.Volume,
+	retentionStartDate time.Time) {
+
+	if snapshot != nil && snapshot.StartTime.After(retentionStartDate) {
+		log.Infof(
+			"skipped snapshot removal, retention period not exceeded: "+
+				"volume - %s; snapshot - %s",
+			*volume.VolumeId,
+			*snapshot.SnapshotId)
+		return
+	}
+
+	// An error is an indication of a state that is not valid for old snapshot to be removed.
+	// This is done to avoid removing last remaining ebs snapshot in case of error.
+	if err := w.ebsClient.RemoveSnapshot(snapshot); err != nil {
+		log.WithError(err).Error("failed to remove old snapshot")
+		return
+	}
+
+	w.deletedCounter.WithLabelValues(*volume.VolumeId, *snapshot.SnapshotId).Inc()
+	log.Infof(
+		"old snapshot with id %s for volume %s has been deleted",
+		*snapshot.SnapshotId, *volume.VolumeId)
 }

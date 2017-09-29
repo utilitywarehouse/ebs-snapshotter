@@ -41,6 +41,8 @@ type WatcherSuite struct {
 func TestEBSWatcher(t *testing.T) { TestingT(t) }
 
 func (s *WatcherSuite) SetUpSuite(c *C) {
+	logrus.SetLevel(logrus.DebugLevel)
+
 	createdCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "snapshots_performed",
 		Help: "A counter of the total number of snapshots created",
@@ -79,7 +81,7 @@ func (s *WatcherSuite) TestLogErrorWhenFailedToGetEC2Snapshots(c *C) {
 	c.Assert(err.Error(), Equals, "error while fetching snapshots: test snapshots error message")
 }
 
-func (s *WatcherSuite) TestIfUpToDateSnapshotIsIgnored(c *C) {
+func (s *WatcherSuite) TestSnapshotNotDeletedWhenUpToDateSnapshotAndRetentionPeriodNotExceeded(c *C) {
 	hook := test.NewGlobal()
 
 	intervalSeconds := int64(11)
@@ -106,15 +108,18 @@ func (s *WatcherSuite) TestIfUpToDateSnapshotIsIgnored(c *C) {
 	volumesErrorOnGet = nil
 	s.watcher.WatchSnapshots(&config)
 
-	c.Assert(len(hook.Entries), Equals, 3)
+	c.Assert(len(hook.Entries), Equals, 4)
 	c.Assert(hook.Entries[0].Level, Equals, logrus.InfoLevel)
 	c.Assert(hook.Entries[0].Message, Equals, "checking volumes and snapshots")
 
-	c.Assert(hook.Entries[1].Level, Equals, logrus.InfoLevel)
+	c.Assert(hook.Entries[1].Level, Equals, logrus.DebugLevel)
 	c.Assert(hook.Entries[1].Message, Equals, "volume volume-1 has an up to date snapshot")
 
 	c.Assert(hook.Entries[2].Level, Equals, logrus.InfoLevel)
-	c.Assert(hook.Entries[2].Message, Equals, "finished checking volumes and snapshots")
+	c.Assert(hook.Entries[2].Message, Equals, "skipped snapshot removal, retention period not exceeded: volume - volume-1; snapshot - snapshot-1")
+
+	c.Assert(hook.Entries[3].Level, Equals, logrus.InfoLevel)
+	c.Assert(hook.Entries[3].Message, Equals, "finished checking volumes and snapshots")
 }
 
 func (s *WatcherSuite) TestIfOldSnapshotNotDeletedOnCreateNewSnapshotError(c *C) {
@@ -155,7 +160,7 @@ func (s *WatcherSuite) TestIfOldSnapshotNotDeletedOnCreateNewSnapshotError(c *C)
 	c.Assert(hook.Entries[0].Message, Equals, "checking volumes and snapshots")
 
 	c.Assert(hook.Entries[1].Level, Equals, logrus.ErrorLevel)
-	c.Assert(hook.Entries[1].Message, Equals, "error occurred while creating snapshot")
+	c.Assert(hook.Entries[1].Message, Equals, "error occurred while creating a new snapshot")
 	c.Assert(hook.Entries[1].Data["error"].(error).Error(), Equals, errorMsg)
 
 	c.Assert(hook.Entries[2].Level, Equals, logrus.InfoLevel)
@@ -199,7 +204,7 @@ func (s *WatcherSuite) TestIfOldSnapshotNotDeletedWhenRetentionPeriodNotExceeded
 	c.Assert(hook.Entries[0].Message, Equals, "checking volumes and snapshots")
 
 	c.Assert(hook.Entries[1].Level, Equals, logrus.InfoLevel)
-	c.Assert(hook.Entries[1].Message, Equals, "created snapshot for volume volume-1")
+	c.Assert(hook.Entries[1].Message, Equals, "created a new snapshot for volume volume-1")
 
 	c.Assert(hook.Entries[2].Level, Equals, logrus.InfoLevel)
 	c.Assert(hook.Entries[2].Message, Equals, "skipped snapshot removal, retention period not exceeded: volume - volume-1; snapshot - snapshot-1")
@@ -245,7 +250,7 @@ func (s *WatcherSuite) TestIfOldSnapshotDeletedWhenRetentionPeriodExceeded(c *C)
 	c.Assert(hook.Entries[0].Message, Equals, "checking volumes and snapshots")
 
 	c.Assert(hook.Entries[1].Level, Equals, logrus.InfoLevel)
-	c.Assert(hook.Entries[1].Message, Equals, "created snapshot for volume volume-1")
+	c.Assert(hook.Entries[1].Message, Equals, "created a new snapshot for volume volume-1")
 
 	c.Assert(hook.Entries[2].Level, Equals, logrus.InfoLevel)
 	c.Assert(hook.Entries[2].Message, Equals, "old snapshot with id snapshot-1 for volume volume-1 has been deleted")
@@ -293,7 +298,7 @@ func (s *WatcherSuite) TestIfOldSnapshotNotDeletedWhileRemovingOldSnapshotEncoun
 	c.Assert(hook.Entries[0].Message, Equals, "checking volumes and snapshots")
 
 	c.Assert(hook.Entries[1].Level, Equals, logrus.InfoLevel)
-	c.Assert(hook.Entries[1].Message, Equals, "created snapshot for volume volume-1")
+	c.Assert(hook.Entries[1].Message, Equals, "created a new snapshot for volume volume-1")
 
 	c.Assert(hook.Entries[2].Level, Equals, logrus.ErrorLevel)
 	c.Assert(hook.Entries[2].Message, Equals, "failed to remove old snapshot")
