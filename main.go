@@ -20,6 +20,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/utilitywarehouse/ebs-snapshotter/clients"
 	"github.com/utilitywarehouse/go-operational/op"
+	"github.com/utilitywarehouse/ebs-snapshotter/models"
 )
 
 var (
@@ -30,18 +31,6 @@ var (
 	deletedCounter *prometheus.CounterVec
 	errors         prometheus.Counter
 )
-
-type VolumeSnapshotConfigs []*VolumeSnapshotConfig
-
-type VolumeSnapshotConfig struct {
-	Labels          Label `json:"labels"`
-	IntervalSeconds int64 `json:"intervalSeconds"`
-}
-
-type Label struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
-}
 
 func main() {
 	app := cli.App(NAME, DESC)
@@ -123,7 +112,7 @@ func main() {
 
 func WatchSnapshots(
 	intervalSeconds, retentionPeriod int,
-	snapshotConfigs *VolumeSnapshotConfigs,
+	snapshotConfigs *models.VolumeSnapshotConfigs,
 	ebsClient clients.Client,
 	createdCounter, deletedCounter *prometheus.CounterVec) {
 
@@ -195,7 +184,7 @@ func CreateEc2Client(awsAccessKey string, awsSecretKey string, ec2Region string)
 	return ec2Client
 }
 
-func LoadVolumeSnapshotConfig(volumeSnapshotConfigFile string) *VolumeSnapshotConfigs {
+func LoadVolumeSnapshotConfig(volumeSnapshotConfigFile string) *models.VolumeSnapshotConfigs{
 	confFile, err := os.Open(volumeSnapshotConfigFile)
 	if err != nil {
 		log.Fatalf("Error while opening volume snapshot config file: %v", err)
@@ -204,7 +193,7 @@ func LoadVolumeSnapshotConfig(volumeSnapshotConfigFile string) *VolumeSnapshotCo
 	if err != nil {
 		log.Fatalf("Error while reading volume snapshot config file: %v", err)
 	}
-	snapshotConfigs := &VolumeSnapshotConfigs{}
+	snapshotConfigs := &models.VolumeSnapshotConfigs{}
 	if err = json.Unmarshal(fileContent, snapshotConfigs); err != nil {
 		log.Fatalf("Error while deserialising volume snapshot config file: %v", err)
 	}
