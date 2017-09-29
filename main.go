@@ -3,12 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"log"
-	"net/http"
-	"os"
-	"time"
-
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -19,8 +13,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/utilitywarehouse/ebs-snapshotter/clients"
-	"github.com/utilitywarehouse/go-operational/op"
 	"github.com/utilitywarehouse/ebs-snapshotter/models"
+	w "github.com/utilitywarehouse/ebs-snapshotter/watcher"
+	"github.com/utilitywarehouse/go-operational/op"
+	"io/ioutil"
+	"log"
+	"net/http"
+	"os"
+	"time"
 )
 
 var (
@@ -98,81 +98,20 @@ func main() {
 
 		ebsClient := clients.NewEBSClient(ec2Client)
 
-		go initialiseHttpServer(*httpPort)
-		WatchSnapshots(
-			*pollIntervalSeconds,
+		watcher := w.NewEBSSnapshotWatcher(
 			*oldSnapshotsRetentionPeriod,
-			snapshotConfigs,
 			ebsClient,
 			createdCounter,
-			deletedCounter)
+			deletedCounter,
+		)
+
+		go initialiseHttpServer(*httpPort)
+		for {
+			watcher.WatchSnapshots(snapshotConfigs)
+			<-time.After(time.Duration(*pollIntervalSeconds) * time.Second)
+		}
 	}
 	app.Run(os.Args)
-}
-
-func WatchSnapshots(
-	intervalSeconds, retentionPeriod int,
-	snapshotConfigs *models.VolumeSnapshotConfigs,
-	ebsClient clients.Client,
-	createdCounter, deletedCounter *prometheus.CounterVec) {
-
-	for {
-		vols, err := ebsClient.GetVolumes()
-		if err != nil {
-			log.Printf("error while fetching volumes: %v", err)
-		}
-
-		snaps, err := ebsClient.GetSnapshots()
-		if err != nil {
-			log.Printf("error while fetching snapshots: %v", err)
-		}
-
-		log.Print("checking volumes and snapshots")
-		retentionStartDate := time.Now().Add(-time.Duration(retentionPeriod) * time.Hour)
-		for _, config := range *snapshotConfigs {
-			key := config.Labels.Key
-			val := config.Labels.Value
-
-			acceptableStartTime := time.Now().Add(time.Duration(-config.IntervalSeconds) * time.Second)
-			for _, vol := range vols {
-				for _, tag := range vol.Tags {
-					if *tag.Key == key && *tag.Value == val {
-						lastSnapshot := snaps[*vol.VolumeId]
-
-						if lastSnapshot != nil && !lastSnapshot.StartTime.Before(acceptableStartTime) && *lastSnapshot.State != "error" {
-							log.Printf("volume %s has an up to date snapshot", *vol.VolumeId)
-							continue
-						}
-						if err := ebsClient.CreateSnapshot(vol, lastSnapshot); err != nil {
-							log.Printf("error occured while creating snapshot: %v", err)
-							continue
-						}
-						log.Printf("created snapshot for volume %s", *vol.VolumeId)
-						createdCounter.WithLabelValues(*vol.VolumeId).Inc()
-
-						if lastSnapshot == nil && lastSnapshot.StartTime.After(retentionStartDate) {
-							log.Printf(
-								"skiped snapshot removal, retention period not exceeded: "+
-									"volume - %s; snapshot - %s",
-								*vol.VolumeId,
-								lastSnapshot.SnapshotId)
-							continue
-						}
-						deletedCounter.WithLabelValues(*vol.VolumeId, *lastSnapshot.SnapshotId).Inc()
-						log.Printf("old snapshot with id %s for volume %s has been deleted", *vol.VolumeId, *lastSnapshot.SnapshotId)
-
-						// An error is an indication of a state that is not valid for old snapshot to be removed.
-						// This is done to avoid removing last remaining ebs snapshot in case of error.
-						if err := ebsClient.RemoveSnapshot(vol, lastSnapshot); err != nil {
-							log.Printf("failed to remove old snapshot: %v", err)
-						}
-					}
-				}
-			}
-		}
-		log.Print("finished checking volumes and snapshots")
-		<-time.After(time.Duration(intervalSeconds) * time.Second)
-	}
 }
 
 func CreateEc2Client(awsAccessKey string, awsSecretKey string, ec2Region string) *ec2.EC2 {
@@ -184,7 +123,7 @@ func CreateEc2Client(awsAccessKey string, awsSecretKey string, ec2Region string)
 	return ec2Client
 }
 
-func LoadVolumeSnapshotConfig(volumeSnapshotConfigFile string) *models.VolumeSnapshotConfigs{
+func LoadVolumeSnapshotConfig(volumeSnapshotConfigFile string) *models.VolumeSnapshotConfigs {
 	confFile, err := os.Open(volumeSnapshotConfigFile)
 	if err != nil {
 		log.Fatalf("Error while opening volume snapshot config file: %v", err)
