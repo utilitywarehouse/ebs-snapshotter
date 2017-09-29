@@ -1,4 +1,4 @@
-package main
+package ebs_snapshotter
 
 import (
 	"encoding/json"

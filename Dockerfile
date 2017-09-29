@@ -1,11 +1,28 @@
-FROM alpine
+FROM golang:1.9-alpine AS build
 
-RUN apk add --no-cache ca-certificates
+RUN apk update && apk add make git gcc musl-dev
 
-RUN mkdir -p /app/config
+ARG GITHUB_TOKEN
+ARG SERVICE
 
-WORKDIR /app
+RUN git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
 
-ADD ebs-snapshotter ebs-snapshotter
+ADD . /go/src/github.com/utilitywarehouse/${SERVICE}
 
-CMD ./ebs-snapshotter
+WORKDIR /go/src/github.com/utilitywarehouse/${SERVICE}
+
+RUN make clean install
+RUN make ${SERVICE}
+
+RUN mv ${SERVICE} /${SERVICE}
+
+FROM alpine:3.6
+
+ARG SERVICE
+
+ENV APP=${SERVICE}
+
+RUN apk add --no-cache ca-certificates && mkdir /app
+COPY --from=build /${SERVICE} /app/${SERVICE}
+
+ENTRYPOINT /app/${APP}
