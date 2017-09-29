@@ -17,14 +17,14 @@ type Watcher interface {
 // EBSSnapshotWatcher used to check EC2 EBS snapshots
 type EBSSnapshotWatcher struct {
 	retentionPeriod                int
-	ebsClient                      clients.Client
+	ebsClient                      clients.EBSClient
 	createdCounter, deletedCounter *prometheus.CounterVec
 }
 
 // NewEBSSnapshotWatcher used to create a new instance of EBS snapshot watcher
 func NewEBSSnapshotWatcher(
 	retentionPeriod int,
-	ebsClient clients.Client,
+	ebsClient clients.EBSClient,
 	createdCounter, deletedCounter *prometheus.CounterVec) *EBSSnapshotWatcher {
 
 	return &EBSSnapshotWatcher{
