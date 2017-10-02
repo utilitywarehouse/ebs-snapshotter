@@ -1,6 +1,8 @@
 package clients
 
 import (
+	"sort"
+
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/pkg/errors"
 )
@@ -84,7 +86,12 @@ func (c *ebsClient) GetSnapshots() (EC2Snapshots, error) {
 		snapshots = append(snapshots, snaps.Snapshots...)
 	}
 
-	return mapSnapshotsToVolumes(snapshots), nil
+	mappedSnapshots := MapSnapshotsToVolumes(snapshots)
+	for _, snaps := range mappedSnapshots {
+		SortSnapshotsByStartTime(snaps)
+	}
+
+	return mappedSnapshots, nil
 }
 
 // CreateSnapshot used to create a new EC2 EBS snapshot for given volume
@@ -121,7 +128,8 @@ func mapVolumesToIds(volumes []*ec2.Volume) EC2Volumes {
 	return output
 }
 
-func mapSnapshotsToVolumes(snapshots []*ec2.Snapshot) EC2Snapshots {
+// MapSnapshotsToVolumes used to map EBS snapshots by Volume ID
+func MapSnapshotsToVolumes(snapshots []*ec2.Snapshot) EC2Snapshots {
 	output := make(EC2Snapshots)
 	for _, snapshot := range snapshots {
 		switch {
@@ -133,4 +141,24 @@ func mapSnapshotsToVolumes(snapshots []*ec2.Snapshot) EC2Snapshots {
 
 	}
 	return output
+}
+
+// SortSnapshotsByStartTime used to sort EBS snapshots by start time
+func SortSnapshotsByStartTime(snapshots []*ec2.Snapshot) {
+	sort.Sort(SortByStartTime(snapshots))
+}
+
+// SortByStartTime used to sort EBS snapshots by start time in descending order
+type SortByStartTime []*ec2.Snapshot
+
+func (snap SortByStartTime) Len() int {
+	return len(snap)
+}
+
+func (snap SortByStartTime) Swap(a, b int) {
+	snap[b], snap[a] = snap[a], snap[b]
+}
+
+func (snap SortByStartTime) Less(a, b int) bool {
+	return snap[b].StartTime.Before(*snap[a].StartTime)
 }
