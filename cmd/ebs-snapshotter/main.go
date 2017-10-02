@@ -33,7 +33,7 @@ var (
 	gitHash        string
 	createdCounter *prometheus.CounterVec
 	deletedCounter *prometheus.CounterVec
-	errors         prometheus.Counter
+	errorsTotal    prometheus.Counter
 )
 
 func main() {
@@ -95,12 +95,12 @@ func main() {
 		Name: "old_snapshots_removed",
 		Help: "A counter of the total number of old snapshots removed",
 	}, []string{"volumeId", "snapshotId"})
-	errors = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "errors",
+	errorsTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "errors_total",
 		Help: "A counter of the total number of errors encountered",
 	})
 
-	prometheus.DefaultRegisterer.MustRegister(createdCounter, deletedCounter, errors)
+	prometheus.DefaultRegisterer.MustRegister(createdCounter, deletedCounter, errorsTotal)
 
 	configureLogging(logLevelOpt, logFormatOpt)
 
@@ -114,6 +114,7 @@ func main() {
 			ebsClient,
 			createdCounter,
 			deletedCounter,
+			errorsTotal,
 		)
 
 		go initialiseHTTPServer(*httpPort)

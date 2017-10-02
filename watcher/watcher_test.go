@@ -26,6 +26,7 @@ var _ = Suite(&WatcherSuite{})
 var (
 	createdCounter *prometheus.CounterVec
 	deletedCounter *prometheus.CounterVec
+	e              prometheus.Counter
 
 	ec2Volumes   clients.EC2Volumes
 	ec2Snapshots clients.EC2Snapshots
@@ -53,11 +54,16 @@ func (s *WatcherSuite) SetUpSuite(c *C) {
 		Name: "old_snapshots_removed",
 		Help: "A counter of the total number of old snapshots removed",
 	}, []string{"volumeId", "snapshotId"})
+	e = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "errors_total",
+		Help: "A counter of the total number of errors encountered",
+	})
 
 	s.watcher = w.NewEBSSnapshotWatcher(
 		&MockClient{},
 		createdCounter,
 		deletedCounter,
+		e,
 	)
 }
 

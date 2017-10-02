@@ -20,17 +20,20 @@ type Watcher interface {
 type EBSSnapshotWatcher struct {
 	ebsClient                      clients.EBSClient
 	createdCounter, deletedCounter *prometheus.CounterVec
+	errorsTotal                    prometheus.Counter
 }
 
 // NewEBSSnapshotWatcher used to create a new instance of EBS snapshot watcher
 func NewEBSSnapshotWatcher(
 	ebsClient clients.EBSClient,
-	createdCounter, deletedCounter *prometheus.CounterVec) *EBSSnapshotWatcher {
+	createdCounter, deletedCounter *prometheus.CounterVec,
+	errorsTotal prometheus.Counter) *EBSSnapshotWatcher {
 
 	return &EBSSnapshotWatcher{
 		ebsClient:      ebsClient,
 		createdCounter: createdCounter,
 		deletedCounter: deletedCounter,
+		errorsTotal:    errorsTotal,
 	}
 }
 
@@ -69,7 +72,9 @@ func (w *EBSSnapshotWatcher) WatchSnapshots(config *models.VolumeSnapshotConfigs
 
 					// Removing all old snapshots for given volume
 					for _, snapshot := range snapshots[*volume.VolumeId] {
-						removeOldEBSSnapshot(w, snapshot, volume, retentionStartDate)
+						if err := removeOldEBSSnapshot(w, snapshot, volume, retentionStartDate); err != nil {
+							log.WithError(err).Error("failed to remove old snapshot")
+						}
 						time.Sleep(2 * time.Second) // A delay so that we don't exceed AWS request limits
 					}
 				}
@@ -92,6 +97,7 @@ func createNewEBSSnapshot(
 		return nil
 	}
 	if err := w.ebsClient.CreateSnapshot(volume); err != nil {
+		w.errorsTotal.Inc()
 		return err
 	}
 	log.Infof(
@@ -105,7 +111,7 @@ func removeOldEBSSnapshot(
 	w *EBSSnapshotWatcher,
 	snapshot *ec2.Snapshot,
 	volume *ec2.Volume,
-	retentionStartDate time.Time) {
+	retentionStartDate time.Time) error {
 
 	if snapshot != nil && snapshot.StartTime.After(retentionStartDate) {
 		log.Infof(
@@ -115,18 +121,20 @@ func removeOldEBSSnapshot(
 			*snapshot.SnapshotId,
 			*snapshot.StartTime,
 			retentionStartDate)
-		return
+		return nil
 	}
 
 	// An error is an indication of a state that is not valid for old snapshot to be removed.
 	// This is done to avoid removing last remaining ebs snapshot in case of error.
 	if err := w.ebsClient.RemoveSnapshot(snapshot); err != nil {
-		log.WithError(err).Error("failed to remove old snapshot")
-		return
+		w.errorsTotal.Inc()
+		return err
 	}
 
 	w.deletedCounter.WithLabelValues(*volume.VolumeId, *snapshot.SnapshotId).Inc()
 	log.Infof(
 		"old snapshot with id %s for volume %s has been deleted",
 		*snapshot.SnapshotId, *volume.VolumeId)
+
+	return nil
 }
