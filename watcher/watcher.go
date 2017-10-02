@@ -65,6 +65,7 @@ func (w *EBSSnapshotWatcher) WatchSnapshots(config *models.VolumeSnapshotConfigs
 					// Removing all old snapshots for given volume
 					for _, snapshot := range snapshots[*volume.VolumeId] {
 						removeOldEBSSnapshot(w, snapshot, volume, retentionStartDate)
+						time.Sleep(2 * time.Second) // A delay so that we don't exceed AWS request limits
 					}
 				}
 			}
