@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
 	"time"
@@ -18,6 +17,7 @@ import (
 	"github.com/jawher/mow.cli"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	log "github.com/sirupsen/logrus"
 	"github.com/utilitywarehouse/ebs-snapshotter/clients"
 	"github.com/utilitywarehouse/ebs-snapshotter/models"
 	w "github.com/utilitywarehouse/ebs-snapshotter/watcher"
@@ -74,6 +74,18 @@ func main() {
 		EnvVar: "AWS_REGION",
 		Value:  "eu-west-1",
 	})
+	logLevelOpt := app.String(cli.StringOpt{
+		Name:   "log-level",
+		Desc:   "Log level (e.g. INFO, DEBUG, WARN)",
+		EnvVar: "LOG_LEVEL",
+		Value:  "INFO",
+	})
+	logFormatOpt := app.String(cli.StringOpt{
+		Name:   "log-f",
+		Desc:   "Log format, if set to text will use text as logging format, otherwise will use json",
+		EnvVar: "LOG_FORMAT",
+		Value:  "text",
+	})
 
 	createdCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "snapshots_performed",
@@ -89,6 +101,8 @@ func main() {
 	})
 
 	prometheus.DefaultRegisterer.MustRegister(createdCounter, deletedCounter, errors)
+
+	configureLogging(logLevelOpt, logFormatOpt)
 
 	app.Action = func() {
 		snapshotConfigs := loadVolumeSnapshotConfig(*volumeSnapshotConfigFile)
@@ -160,4 +174,18 @@ func getOpHandler() http.Handler {
 			ReadyUseHealthCheck().
 			AddLink("VCS Repo", "https://github.com/utilitywarehouse/ebs-snapshotter"),
 	)
+}
+
+func configureLogging(logLevel, logFormat *string) {
+	switch {
+	case *logFormat == "text":
+		log.SetFormatter(&log.TextFormatter{})
+	default:
+		log.SetFormatter(&log.JSONFormatter{})
+	}
+	level, err := log.ParseLevel(*logLevel)
+	if err != nil {
+		log.Fatalf("error parsing log level: %v", err)
+	}
+	log.SetLevel(level)
 }
