@@ -1,9 +1,38 @@
 [
   {
+    "retentionPeriodHours": 336,
     "intervalSeconds": 43200,
     "labels": {
       "key": "kubernetes.io/created-for/pvc/name",
       "value": "datadir-kafka-0"
     }
+  },{
+  "retentionPeriodHours": 336,
+  "intervalSeconds": 43200,
+  "labels": {
+    "key": "kubernetes.io/created-for/pvc/name",
+    "value": "datadir-kafka-1"
   }
+},{
+  "retentionPeriodHours": 336,
+  "intervalSeconds": 43200,
+  "labels": {
+    "key": "kubernetes.io/created-for/pvc/name",
+    "value": "datadir-kafka-2"
+  }
+},{
+  "retentionPeriodHours": 336,
+  "intervalSeconds": 43200,
+  "labels": {
+    "key": "kubernetes.io/created-for/pvc/name",
+    "value": "datadir-kafka-3"
+  }
+},{
+  "retentionPeriodHours": 336,
+  "intervalSeconds": 43200,
+  "labels": {
+    "key": "kubernetes.io/created-for/pvc/name",
+    "value": "datadir-kafka-4"
+  }
+}
 ]

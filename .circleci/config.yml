@@ -1,0 +1,41 @@
+version: 2
+jobs:
+  build:
+    working_directory: /go/src/github.com/utilitywarehouse/ebs-snapshotter
+    docker:
+    - image: circleci/golang:1.9
+    steps:
+      - checkout
+      - run: git config --global url."https://$GITHUB_TOKEN:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+      - run: make install
+      - run: make lint test
+
+  deploy:
+    working_directory: /go/src/github.com/utilitywarehouse/ebs-snapshotter
+    docker:
+    - image: circleci/golang:1.9
+    steps:
+      - checkout
+      - run: git config --global url."https://$GITHUB_TOKEN:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+      - run: make install
+      - run: make lint test
+      - setup_remote_docker:
+          version: 17.06.0-ce
+      - run: make ci-docker-build
+      #- run: make ci-kubernetes-push
+      # Uncomment this if you want automated k8s deployments
+      # You will also need to set the envVar K8S_DEV_TOKEN which you can find by running
+      # k -n telecom get secrets <service-account-token> -ojson | jq -r .data.token | base64 --decode
+
+workflows:
+  version: 2
+  development:
+    jobs:
+      - build:
+          filters:
+            branches:
+              ignore: master
+      - deploy
+  deployment:
+    jobs:
+      - deploy
