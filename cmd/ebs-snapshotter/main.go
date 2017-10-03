@@ -117,7 +117,9 @@ func main() {
 
 		go initialiseHTTPServer(*httpPort)
 		for {
-			watcher.WatchSnapshots(snapshotConfigs)
+			if err := watcher.WatchSnapshots(snapshotConfigs); err != nil {
+				log.WithError(err).Error("an error occurred while watching snapshots")
+			}
 			<-time.After(time.Duration(*pollIntervalSeconds) * time.Second)
 		}
 	}

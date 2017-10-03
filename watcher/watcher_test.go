@@ -112,7 +112,9 @@ func (s *WatcherSuite) TestSnapshotNotDeletedWhenUpToDateSnapshotAndRetentionPer
 
 	snapshotsErrorOnGet = nil
 	volumesErrorOnGet = nil
-	s.watcher.WatchSnapshots(&config)
+	err := s.watcher.WatchSnapshots(&config)
+
+	c.Assert(err, IsNil)
 
 	c.Assert(len(hook.Entries), Equals, 4)
 	c.Assert(hook.Entries[0].Level, Equals, logrus.InfoLevel)
@@ -159,7 +161,9 @@ func (s *WatcherSuite) TestIfOldSnapshotNotDeletedOnCreateNewSnapshotError(c *C)
 	volumesErrorOnGet = nil
 	snapshotErrorOnRemove = nil
 
-	s.watcher.WatchSnapshots(&config)
+	err := s.watcher.WatchSnapshots(&config)
+
+	c.Assert(err, IsNil)
 
 	c.Assert(len(hook.Entries), Equals, 3)
 	c.Assert(hook.Entries[0].Level, Equals, logrus.InfoLevel)
@@ -203,7 +207,9 @@ func (s *WatcherSuite) TestIfOldSnapshotNotDeletedWhenRetentionPeriodNotExceeded
 	volumesErrorOnGet = nil
 	snapshotErrorOnRemove = nil
 
-	s.watcher.WatchSnapshots(&config)
+	err := s.watcher.WatchSnapshots(&config)
+
+	c.Assert(err, IsNil)
 
 	c.Assert(len(hook.Entries), Equals, 4)
 	c.Assert(hook.Entries[0].Level, Equals, logrus.InfoLevel)
@@ -249,7 +255,9 @@ func (s *WatcherSuite) TestIfOldSnapshotDeletedWhenRetentionPeriodExceeded(c *C)
 	volumesErrorOnGet = nil
 	snapshotErrorOnRemove = nil
 
-	s.watcher.WatchSnapshots(&config)
+	err := s.watcher.WatchSnapshots(&config)
+
+	c.Assert(err, IsNil)
 
 	c.Assert(len(hook.Entries), Equals, 4)
 	c.Assert(hook.Entries[0].Level, Equals, logrus.InfoLevel)
@@ -297,7 +305,9 @@ func (s *WatcherSuite) TestIfOldSnapshotNotDeletedWhileRemovingOldSnapshotEncoun
 	errorMsg := "test remove old snapshot error message"
 	snapshotErrorOnRemove = errors.New(errorMsg)
 
-	s.watcher.WatchSnapshots(&config)
+	err := s.watcher.WatchSnapshots(&config)
+
+	c.Assert(err, IsNil)
 
 	c.Assert(len(hook.Entries), Equals, 4)
 	c.Assert(hook.Entries[0].Level, Equals, logrus.InfoLevel)
@@ -360,7 +370,9 @@ func (s *WatcherSuite) TestOnlyOldSnapshotDeletedWhenRetentionPeriodExceeded(c *
 	volumesErrorOnGet = nil
 	snapshotErrorOnRemove = nil
 
-	s.watcher.WatchSnapshots(&config)
+	err := s.watcher.WatchSnapshots(&config)
+
+	c.Assert(err, IsNil)
 
 	c.Assert(len(hook.Entries), Equals, 5)
 	c.Assert(hook.Entries[0].Level, Equals, logrus.InfoLevel)
