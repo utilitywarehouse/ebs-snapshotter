@@ -18,22 +18,20 @@ type Watcher interface {
 
 // EBSSnapshotWatcher used to check EC2 EBS snapshots
 type EBSSnapshotWatcher struct {
-	ebsClient                      clients.EBSClient
-	createdCounter, deletedCounter *prometheus.CounterVec
-	errorsTotal                    prometheus.Counter
+	ebsClient                         clients.EBSClient
+	crCounter, delCounter, errCounter *prometheus.CounterVec
 }
 
 // NewEBSSnapshotWatcher used to create a new instance of EBS snapshot watcher
 func NewEBSSnapshotWatcher(
 	ebsClient clients.EBSClient,
-	createdCounter, deletedCounter *prometheus.CounterVec,
-	errorsTotal prometheus.Counter) *EBSSnapshotWatcher {
+	crCounter, delCounter, errCounter *prometheus.CounterVec) *EBSSnapshotWatcher {
 
 	return &EBSSnapshotWatcher{
-		ebsClient:      ebsClient,
-		createdCounter: createdCounter,
-		deletedCounter: deletedCounter,
-		errorsTotal:    errorsTotal,
+		ebsClient:  ebsClient,
+		crCounter:  crCounter,
+		delCounter: delCounter,
+		errCounter: errCounter,
 	}
 }
 
@@ -65,14 +63,14 @@ func (w *EBSSnapshotWatcher) WatchSnapshots(config *models.VolumeSnapshotConfigs
 					if len(snapshots[*volume.VolumeId]) > 0 {
 						latestSnapshot = snapshots[*volume.VolumeId][0]
 					}
-					if err := createNewEBSSnapshot(w, latestSnapshot, volume, acceptableStartTime); err != nil {
+					if err := createNewEBSSnapshot(w, latestSnapshot, volume, acceptableStartTime, tag.Value); err != nil {
 						log.WithError(err).Error("error occurred while creating a new snapshot")
 						continue
 					}
 
 					// Removing all old snapshots for given volume
 					for _, snapshot := range snapshots[*volume.VolumeId] {
-						if err := removeOldEBSSnapshot(w, snapshot, volume, retentionStartDate); err != nil {
+						if err := removeOldEBSSnapshot(w, snapshot, volume, retentionStartDate, tag.Value); err != nil {
 							log.WithError(err).Error("failed to remove old snapshot")
 						}
 						time.Sleep(2 * time.Second) // A delay so that we don't exceed AWS request limits
@@ -89,7 +87,8 @@ func createNewEBSSnapshot(
 	w *EBSSnapshotWatcher,
 	snapshot *ec2.Snapshot,
 	volume *ec2.Volume,
-	acceptableStartTime time.Time) error {
+	acceptableStartTime time.Time,
+	tag *string) error {
 
 	if snapshot != nil && !snapshot.StartTime.Before(acceptableStartTime) && *snapshot.State != "error" {
 		log.Debugf("volume %s has an up to date snapshot, snapshot start time: %s, acceptable start time: %s",
@@ -97,13 +96,13 @@ func createNewEBSSnapshot(
 		return nil
 	}
 	if err := w.ebsClient.CreateSnapshot(volume); err != nil {
-		w.errorsTotal.Inc()
+		w.errCounter.WithLabelValues(*tag).Inc()
 		return err
 	}
 	log.Infof(
 		"created a new snapshot for %s volume, old snapshot id: %s; snapshot start time: %s, acceptable start time: %s",
 		*volume.VolumeId, *snapshot.SnapshotId, *snapshot.StartTime, acceptableStartTime)
-	w.createdCounter.WithLabelValues(*volume.VolumeId).Inc()
+	w.crCounter.WithLabelValues(*tag).Inc()
 	return nil
 }
 
@@ -111,7 +110,8 @@ func removeOldEBSSnapshot(
 	w *EBSSnapshotWatcher,
 	snapshot *ec2.Snapshot,
 	volume *ec2.Volume,
-	retentionStartDate time.Time) error {
+	retentionStartDate time.Time,
+	tag *string) error {
 
 	if snapshot != nil && snapshot.StartTime.After(retentionStartDate) {
 		log.Infof(
@@ -127,11 +127,11 @@ func removeOldEBSSnapshot(
 	// An error is an indication of a state that is not valid for old snapshot to be removed.
 	// This is done to avoid removing last remaining ebs snapshot in case of error.
 	if err := w.ebsClient.RemoveSnapshot(snapshot); err != nil {
-		w.errorsTotal.Inc()
+		w.errCounter.WithLabelValues(*tag).Inc()
 		return err
 	}
 
-	w.deletedCounter.WithLabelValues(*volume.VolumeId, *snapshot.SnapshotId).Inc()
+	w.delCounter.WithLabelValues(*tag).Inc()
 	log.Infof(
 		"old snapshot with id %s for volume %s has been deleted",
 		*snapshot.SnapshotId, *volume.VolumeId)
