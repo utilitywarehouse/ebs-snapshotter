@@ -32,6 +32,7 @@ const (
 var (
 	gitHash                           string
 	crCounter, delCounter, errCounter *prometheus.CounterVec
+	snapshotCounter                   *prometheus.GaugeVec
 )
 
 func main() {
@@ -88,17 +89,21 @@ func main() {
 	crCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "snapshots_performed",
 		Help: "A counter of the total number of snapshots created",
-	}, []string{"tag"})
+	}, []string{"pvc_name", "pvc_namespace", "volume_id"})
 	delCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "old_snapshots_removed",
 		Help: "A counter of the total number of old snapshots removed",
-	}, []string{"tag", "snapshotId"})
+	}, []string{"pvc_name", "pvc_namespace", "volume_id"})
 	errCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "errors_total",
 		Help: "A counter of the total number of errors encountered",
-	}, []string{"tag"})
+	}, []string{"pvc_name", "pvc_namespace", "volume_id"})
+	snapshotCounter = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "snapshots_total",
+		Help: "A counter of the total number of snapshots",
+	}, []string{"pvc_name", "pvc_namespace", "volume_id"})
 
-	prometheus.DefaultRegisterer.MustRegister(crCounter, delCounter, errCounter)
+	prometheus.DefaultRegisterer.MustRegister(crCounter, delCounter, errCounter, snapshotCounter)
 
 	configureLogging(logLevelOpt, logFormatOpt)
 
@@ -108,7 +113,7 @@ func main() {
 
 		ebsClient := clients.NewEBSClient(ec2Client)
 
-		watcher := w.NewEBSSnapshotWatcher(ebsClient, crCounter, delCounter, errCounter)
+		watcher := w.NewEBSSnapshotWatcher(ebsClient, crCounter, delCounter, errCounter, snapshotCounter)
 
 		go initialiseHTTPServer(*httpPort)
 		for {
