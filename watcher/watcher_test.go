@@ -24,9 +24,8 @@ var (
 var _ = Suite(&WatcherSuite{})
 
 var (
-	createdCounter *prometheus.CounterVec
-	deletedCounter *prometheus.CounterVec
-	e              prometheus.Counter
+	crCounter, delCounter, errCounter *prometheus.CounterVec
+	snapshotCounter                   *prometheus.GaugeVec
 
 	ec2Volumes   clients.EC2Volumes
 	ec2Snapshots clients.EC2Snapshots
@@ -46,25 +45,24 @@ func TestEBSWatcher(t *testing.T) { TestingT(t) }
 func (s *WatcherSuite) SetUpSuite(c *C) {
 	logrus.SetLevel(logrus.DebugLevel)
 
-	createdCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+	crCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "snapshots_performed",
 		Help: "A counter of the total number of snapshots created",
-	}, []string{"volumeId"})
-	deletedCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+	}, []string{"pvc_name", "pvc_namespace", "volume_id"})
+	delCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "old_snapshots_removed",
 		Help: "A counter of the total number of old snapshots removed",
-	}, []string{"volumeId", "snapshotId"})
-	e = prometheus.NewCounter(prometheus.CounterOpts{
+	}, []string{"pvc_name", "pvc_namespace", "volume_id"})
+	errCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "errors_total",
 		Help: "A counter of the total number of errors encountered",
-	})
+	}, []string{"pvc_name", "pvc_namespace", "volume_id"})
+	snapshotCounter = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "snapshots_total",
+		Help: "A counter of the total number of snapshots",
+	}, []string{"pvc_name", "pvc_namespace", "volume_id"})
 
-	s.watcher = w.NewEBSSnapshotWatcher(
-		&MockClient{},
-		createdCounter,
-		deletedCounter,
-		e,
-	)
+	s.watcher = w.NewEBSSnapshotWatcher(&MockClient{}, crCounter, delCounter, errCounter, snapshotCounter)
 }
 
 func (s *WatcherSuite) TestLogErrorWhenFailedToGetEC2Volumes(c *C) {

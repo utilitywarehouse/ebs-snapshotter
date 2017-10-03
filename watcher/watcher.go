@@ -11,6 +11,11 @@ import (
 	"github.com/utilitywarehouse/ebs-snapshotter/models"
 )
 
+const (
+	pvcName      = "kubernetes.io/created-for/pvc/name"
+	pvcNamespace = "kubernetes.io/created-for/pvc/namespace"
+)
+
 // Watcher interface specifies EBS snapshot watcher functions
 type Watcher interface {
 	WatchSnapshots(config *models.VolumeSnapshotConfigs)
@@ -18,22 +23,23 @@ type Watcher interface {
 
 // EBSSnapshotWatcher used to check EC2 EBS snapshots
 type EBSSnapshotWatcher struct {
-	ebsClient                      clients.EBSClient
-	createdCounter, deletedCounter *prometheus.CounterVec
-	errorsTotal                    prometheus.Counter
+	ebsClient                         clients.EBSClient
+	crCounter, delCounter, errCounter *prometheus.CounterVec
+	snapshotCounter                   *prometheus.GaugeVec
 }
 
 // NewEBSSnapshotWatcher used to create a new instance of EBS snapshot watcher
 func NewEBSSnapshotWatcher(
 	ebsClient clients.EBSClient,
-	createdCounter, deletedCounter *prometheus.CounterVec,
-	errorsTotal prometheus.Counter) *EBSSnapshotWatcher {
+	crCounter, delCounter, errCounter *prometheus.CounterVec,
+	snapshotCounter *prometheus.GaugeVec) *EBSSnapshotWatcher {
 
 	return &EBSSnapshotWatcher{
-		ebsClient:      ebsClient,
-		createdCounter: createdCounter,
-		deletedCounter: deletedCounter,
-		errorsTotal:    errorsTotal,
+		ebsClient:       ebsClient,
+		crCounter:       crCounter,
+		delCounter:      delCounter,
+		errCounter:      errCounter,
+		snapshotCounter: snapshotCounter,
 	}
 }
 
@@ -61,18 +67,40 @@ func (w *EBSSnapshotWatcher) WatchSnapshots(config *models.VolumeSnapshotConfigs
 				if *tag.Key == key && *tag.Value == val {
 					var latestSnapshot *ec2.Snapshot
 
+					pvcName := getPVCName(volume.Tags)
+					pvcNamespace := getPVCNamespace(volume.Tags)
+
+					totalSnapshots := len(snapshots[*volume.VolumeId])
+
+					w.snapshotCounter.WithLabelValues(pvcName, pvcNamespace, *volume.VolumeId).Set(float64(totalSnapshots))
+
 					// If the volume already have at least one snapshot, use the latest
-					if len(snapshots[*volume.VolumeId]) > 0 {
+					if totalSnapshots > 0 {
 						latestSnapshot = snapshots[*volume.VolumeId][0]
 					}
-					if err := createNewEBSSnapshot(w, latestSnapshot, volume, acceptableStartTime); err != nil {
+
+					if err := createNewEBSSnapshot(
+						w,
+						latestSnapshot,
+						volume,
+						acceptableStartTime,
+						pvcName,
+						pvcNamespace); err != nil {
+
 						log.WithError(err).Error("error occurred while creating a new snapshot")
 						continue
 					}
 
 					// Removing all old snapshots for given volume
 					for _, snapshot := range snapshots[*volume.VolumeId] {
-						if err := removeOldEBSSnapshot(w, snapshot, volume, retentionStartDate); err != nil {
+						if err := removeOldEBSSnapshot(
+							w,
+							snapshot,
+							volume,
+							retentionStartDate,
+							pvcName,
+							pvcNamespace); err != nil {
+
 							log.WithError(err).Error("failed to remove old snapshot")
 						}
 						time.Sleep(2 * time.Second) // A delay so that we don't exceed AWS request limits
@@ -85,11 +113,32 @@ func (w *EBSSnapshotWatcher) WatchSnapshots(config *models.VolumeSnapshotConfigs
 	return nil
 }
 
+func getPVCName(tags []*ec2.Tag) string {
+	n := ""
+	for _, tag := range tags {
+		if *tag.Key == pvcName {
+			n = *tag.Value
+		}
+	}
+	return n
+}
+
+func getPVCNamespace(tags []*ec2.Tag) string {
+	n := ""
+	for _, tag := range tags {
+		if *tag.Key == pvcNamespace {
+			n = *tag.Value
+		}
+	}
+	return n
+}
+
 func createNewEBSSnapshot(
 	w *EBSSnapshotWatcher,
 	snapshot *ec2.Snapshot,
 	volume *ec2.Volume,
-	acceptableStartTime time.Time) error {
+	acceptableStartTime time.Time,
+	pvcName, pvcNamespace string) error {
 
 	if snapshot != nil && !snapshot.StartTime.Before(acceptableStartTime) && *snapshot.State != "error" {
 		log.Debugf("volume %s has an up to date snapshot, snapshot start time: %s, acceptable start time: %s",
@@ -97,13 +146,13 @@ func createNewEBSSnapshot(
 		return nil
 	}
 	if err := w.ebsClient.CreateSnapshot(volume); err != nil {
-		w.errorsTotal.Inc()
+		w.errCounter.WithLabelValues(pvcName, pvcNamespace, *volume.VolumeId).Inc()
 		return err
 	}
 	log.Infof(
 		"created a new snapshot for %s volume, old snapshot id: %s; snapshot start time: %s, acceptable start time: %s",
 		*volume.VolumeId, *snapshot.SnapshotId, *snapshot.StartTime, acceptableStartTime)
-	w.createdCounter.WithLabelValues(*volume.VolumeId).Inc()
+	w.crCounter.WithLabelValues(pvcName, pvcNamespace, *volume.VolumeId).Inc()
 	return nil
 }
 
@@ -111,7 +160,8 @@ func removeOldEBSSnapshot(
 	w *EBSSnapshotWatcher,
 	snapshot *ec2.Snapshot,
 	volume *ec2.Volume,
-	retentionStartDate time.Time) error {
+	retentionStartDate time.Time,
+	pvcName, pvcNamespace string) error {
 
 	if snapshot != nil && snapshot.StartTime.After(retentionStartDate) {
 		log.Infof(
@@ -127,11 +177,11 @@ func removeOldEBSSnapshot(
 	// An error is an indication of a state that is not valid for old snapshot to be removed.
 	// This is done to avoid removing last remaining ebs snapshot in case of error.
 	if err := w.ebsClient.RemoveSnapshot(snapshot); err != nil {
-		w.errorsTotal.Inc()
+		w.errCounter.WithLabelValues(pvcName, pvcNamespace, *volume.VolumeId).Inc()
 		return err
 	}
 
-	w.deletedCounter.WithLabelValues(*volume.VolumeId, *snapshot.SnapshotId).Inc()
+	w.delCounter.WithLabelValues(pvcName, pvcNamespace, *volume.VolumeId).Inc()
 	log.Infof(
 		"old snapshot with id %s for volume %s has been deleted",
 		*snapshot.SnapshotId, *volume.VolumeId)
