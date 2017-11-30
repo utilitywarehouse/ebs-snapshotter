@@ -149,9 +149,15 @@ func createNewEBSSnapshot(
 		w.errCounter.WithLabelValues(pvcName, pvcNamespace, *volume.VolumeId).Inc()
 		return err
 	}
-	log.Infof(
-		"created a new snapshot for %s volume, old snapshot id: %s; snapshot start time: %s, acceptable start time: %s",
-		*volume.VolumeId, *snapshot.SnapshotId, *snapshot.StartTime, acceptableStartTime)
+	if snapshot != nil {
+		log.Infof(
+			"created a new snapshot for %s volume, old snapshot id: %s; snapshot start time: %s, acceptable start time: %s",
+			*volume.VolumeId, *snapshot.SnapshotId, *snapshot.StartTime, acceptableStartTime)
+		w.crCounter.WithLabelValues(pvcName, pvcNamespace, *volume.VolumeId).Inc()
+		return nil
+	}
+
+	log.Infof("created first snapshot for %s volume", *volume.VolumeId)
 	w.crCounter.WithLabelValues(pvcName, pvcNamespace, *volume.VolumeId).Inc()
 	return nil
 }
