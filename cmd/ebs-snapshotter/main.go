@@ -12,8 +12,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/gorilla/handlers"
-	"github.com/gorilla/mux"
 	"github.com/jawher/mow.cli"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -150,18 +148,8 @@ func loadVolumeSnapshotConfig(volumeSnapshotConfigFile string) *models.VolumeSna
 }
 
 func initialiseHTTPServer(port int) {
-	router := mux.NewRouter()
-
-	router.NewRoute().PathPrefix("/__/").
-		Methods(http.MethodGet).
-		Handler(getOpHandler())
-
-	router.NewRoute().Path("/_/metrics").
-		Methods(http.MethodGet).
-		Handler(promhttp.Handler())
-
-	loggingHandler := handlers.LoggingHandler(os.Stdout, router)
-	http.Handle("/", loggingHandler)
+	http.Handle("/__/", getOpHandler())
+	http.Handle("/_/metrics", promhttp.Handler())
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), nil))
 }
 
