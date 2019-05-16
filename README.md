@@ -1,5 +1,7 @@
 # EBS Snapshotter
 
+[![Docker Repository on Quay](https://quay.io/repository/utilitywarehouse/ebs-snapshotter/status "Docker Repository on Quay")](https://quay.io/repository/utilitywarehouse/ebs-snapshotter)
+
 Takes snapshots of EBS volumes and deletes old EBS snapshots when the retention
 period is exceeded.
 
