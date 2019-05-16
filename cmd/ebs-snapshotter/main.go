@@ -14,7 +14,6 @@ import (
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/jawher/mow.cli"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
 	"github.com/utilitywarehouse/ebs-snapshotter/clients"
 	"github.com/utilitywarehouse/ebs-snapshotter/models"
@@ -113,7 +112,8 @@ func main() {
 
 		watcher := w.NewEBSSnapshotWatcher(ebsClient, crCounter, delCounter, errCounter, snapshotCounter)
 
-		go initialiseHTTPServer(*httpPort)
+		go log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", *httpPort), getOpHandler()))
+
 		for {
 			watcher.WatchSnapshots(snapshotConfigs)
 			<-time.After(time.Duration(*pollIntervalSeconds) * time.Second)
@@ -145,12 +145,6 @@ func loadVolumeSnapshotConfig(volumeSnapshotConfigFile string) *models.VolumeSna
 		log.Fatalf("Error while deserialising volume snapshot config file: %v", err)
 	}
 	return snapshotConfigs
-}
-
-func initialiseHTTPServer(port int) {
-	http.Handle("/__/", getOpHandler())
-	http.Handle("/_/metrics", promhttp.Handler())
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), nil))
 }
 
 func getOpHandler() http.Handler {
