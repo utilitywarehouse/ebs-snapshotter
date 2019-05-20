@@ -1,12 +1,12 @@
 package watcher
 
 import (
+	"log"
 	"time"
 
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
-	log "github.com/sirupsen/logrus"
 	"github.com/utilitywarehouse/ebs-snapshotter/clients"
 	"github.com/utilitywarehouse/ebs-snapshotter/models"
 )
@@ -55,7 +55,7 @@ func (w *EBSSnapshotWatcher) WatchSnapshots(config *models.VolumeSnapshotConfigs
 		return errors.Wrap(err, "error while fetching snapshots")
 	}
 
-	log.Info("checking volumes and snapshots")
+	log.Printf("checking volumes and snapshots")
 	for _, config := range *config {
 		retentionStartDate := time.Now().Add(-time.Duration(config.RetentionPeriodHours) * time.Hour)
 		acceptableStartTime := time.Now().Add(time.Duration(-config.IntervalSeconds) * time.Second)
@@ -87,7 +87,7 @@ func (w *EBSSnapshotWatcher) WatchSnapshots(config *models.VolumeSnapshotConfigs
 						pvcName,
 						pvcNamespace); err != nil {
 
-						log.WithError(err).Error("error occurred while creating a new snapshot")
+						log.Printf("error occurred while creating a new snapshot, %v", err)
 						continue
 					}
 
@@ -101,7 +101,7 @@ func (w *EBSSnapshotWatcher) WatchSnapshots(config *models.VolumeSnapshotConfigs
 							pvcName,
 							pvcNamespace); err != nil {
 
-							log.WithError(err).Error("failed to remove old snapshot")
+							log.Printf("failed to remove old snapshot, %v", err)
 						}
 						time.Sleep(2 * time.Second) // A delay so that we don't exceed AWS request limits
 					}
@@ -109,7 +109,6 @@ func (w *EBSSnapshotWatcher) WatchSnapshots(config *models.VolumeSnapshotConfigs
 			}
 		}
 	}
-	log.Info("finished checking volumes and snapshots")
 	return nil
 }
 
@@ -141,7 +140,7 @@ func createNewEBSSnapshot(
 	pvcName, pvcNamespace string) error {
 
 	if snapshot != nil && !snapshot.StartTime.Before(acceptableStartTime) && *snapshot.State != "error" {
-		log.Debugf("volume %s has an up to date snapshot, snapshot start time: %s, acceptable start time: %s",
+		log.Printf("volume %s has an up to date snapshot, snapshot start time: %s, acceptable start time: %s",
 			*volume.VolumeId, *snapshot.StartTime, acceptableStartTime)
 		return nil
 	}
@@ -150,14 +149,14 @@ func createNewEBSSnapshot(
 		return err
 	}
 	if snapshot != nil {
-		log.Infof(
+		log.Printf(
 			"created a new snapshot for %s volume, old snapshot id: %s; snapshot start time: %s, acceptable start time: %s",
 			*volume.VolumeId, *snapshot.SnapshotId, *snapshot.StartTime, acceptableStartTime)
 		w.crCounter.WithLabelValues(pvcName, pvcNamespace, *volume.VolumeId).Inc()
 		return nil
 	}
 
-	log.Infof("created first snapshot for %s volume", *volume.VolumeId)
+	log.Printf("created first snapshot for %s volume", *volume.VolumeId)
 	w.crCounter.WithLabelValues(pvcName, pvcNamespace, *volume.VolumeId).Inc()
 	return nil
 }
@@ -170,7 +169,7 @@ func removeOldEBSSnapshot(
 	pvcName, pvcNamespace string) error {
 
 	if snapshot != nil && snapshot.StartTime.After(retentionStartDate) {
-		log.Infof(
+		log.Printf(
 			"skipped snapshot removal, retention period not exceeded, "+
 				"volume: %s, snapshot id: %s, snapshot start time: %s, retention start time: %s",
 			*volume.VolumeId,
@@ -188,7 +187,7 @@ func removeOldEBSSnapshot(
 	}
 
 	w.delCounter.WithLabelValues(pvcName, pvcNamespace, *volume.VolumeId).Inc()
-	log.Infof(
+	log.Printf(
 		"old snapshot with id %s for volume %s has been deleted",
 		*snapshot.SnapshotId, *volume.VolumeId)
 
