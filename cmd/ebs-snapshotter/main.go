@@ -4,21 +4,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/jawher/mow.cli"
 	"github.com/prometheus/client_golang/prometheus"
-	log "github.com/sirupsen/logrus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/utilitywarehouse/ebs-snapshotter/clients"
 	"github.com/utilitywarehouse/ebs-snapshotter/models"
 	w "github.com/utilitywarehouse/ebs-snapshotter/watcher"
-	"github.com/utilitywarehouse/go-operational/op"
 )
 
 const (
@@ -32,56 +31,19 @@ var (
 	snapshotCounter                   *prometheus.GaugeVec
 )
 
+func getEnv(key, fallback string) string {
+	if value, ok := os.LookupEnv(key); ok {
+		return value
+	}
+	return fallback
+}
+
 func main() {
-	app := cli.App(name, description)
-	httpPort := app.Int(cli.IntOpt{
-		Name:   "http-port",
-		Desc:   "HTTP port to listen on ",
-		EnvVar: "HTTP_POST",
-		Value:  8080,
-	})
-	awsAccessKey := app.String(cli.StringOpt{
-		Name:   "aws-access-key",
-		Desc:   "An AWS access key",
-		EnvVar: "AWS_ACCESS_KEY",
-		Value:  "",
-	})
-	awsSecretKey := app.String(cli.StringOpt{
-		Name:   "aws-secret-key",
-		Desc:   "An AWS secret key",
-		EnvVar: "AWS_SECRET_KEY",
-		Value:  "",
-	})
-	volumeSnapshotConfigFile := app.String(cli.StringOpt{
-		Name:   "volume-snapshot-config-file",
-		Desc:   "A path to the volume snapshot json config file",
-		EnvVar: "VOLUME_SNAPSHOT_CONFIG_FILE",
-		Value:  "",
-	})
-	pollIntervalSeconds := app.Int(cli.IntOpt{
-		Name:   "poll-interval-seconds",
-		Desc:   "The interval in seconds between snapshot freshness checks",
-		EnvVar: "POLL_INTERVAL_SECONDS",
-		Value:  1800,
-	})
-	ec2Region := app.String(cli.StringOpt{
-		Name:   "region",
-		Desc:   "AWS Region",
-		EnvVar: "AWS_REGION",
-		Value:  "eu-west-1",
-	})
-	logLevelOpt := app.String(cli.StringOpt{
-		Name:   "log-level",
-		Desc:   "Log level (e.g. INFO, DEBUG, WARN)",
-		EnvVar: "LOG_LEVEL",
-		Value:  "INFO",
-	})
-	logFormatOpt := app.String(cli.StringOpt{
-		Name:   "log-f",
-		Desc:   "Log format, if set to text will use text as logging format, otherwise will use json",
-		EnvVar: "LOG_FORMAT",
-		Value:  "text",
-	})
+	var (
+		httpPort                 = getEnv("HTTP_PORT", "8080")
+		volumeSnapshotConfigFile = getEnv("VOLUME_SNAPSHOT_CONFIG_FILE", "")
+		pollIntervalSeconds      = getEnv("POLL_INTERVAL_SECONDS", "1800")
+	)
 
 	crCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "snapshots_performed",
@@ -102,33 +64,34 @@ func main() {
 
 	prometheus.DefaultRegisterer.MustRegister(crCounter, delCounter, errCounter, snapshotCounter)
 
-	configureLogging(logLevelOpt, logFormatOpt)
+	snapshotConfigs := loadVolumeSnapshotConfig(volumeSnapshotConfigFile)
 
-	app.Action = func() {
-		snapshotConfigs := loadVolumeSnapshotConfig(*volumeSnapshotConfigFile)
-		ec2Client := createEc2Client(*awsAccessKey, *awsSecretKey, *ec2Region)
+	sess, err := session.NewSession(&aws.Config{})
+	ec2Client := ec2.New(sess)
+	ebsClient := clients.NewEBSClient(ec2Client)
 
-		ebsClient := clients.NewEBSClient(ec2Client)
+	watcher := w.NewEBSSnapshotWatcher(ebsClient, crCounter, delCounter, errCounter, snapshotCounter)
 
-		watcher := w.NewEBSSnapshotWatcher(ebsClient, crCounter, delCounter, errCounter, snapshotCounter)
-
-		go log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", *httpPort), getOpHandler()))
-
-		for {
-			watcher.WatchSnapshots(snapshotConfigs)
-			<-time.After(time.Duration(*pollIntervalSeconds) * time.Second)
-		}
+	httpPortInt, err := strconv.Atoi(httpPort)
+	if err != nil {
+		log.Fatalf("httpPort must be convertible to Int, got %v", httpPort)
 	}
-	app.Run(os.Args)
-}
+	pollIntSecInt, err := strconv.Atoi(pollIntervalSeconds)
+	if err != nil {
+		log.Fatalf("pollIntervalSeconds must be convertible to Int, got %v", httpPort)
+	}
 
-func createEc2Client(awsAccessKey string, awsSecretKey string, ec2Region string) *ec2.EC2 {
-	config := aws.NewConfig()
-	config.WithCredentials(credentials.NewStaticCredentials(awsAccessKey, awsSecretKey, "")).
-		WithRegion(ec2Region)
-	awsSess := session.New(config)
-	ec2Client := ec2.New(awsSess)
-	return ec2Client
+	http.Handle("/metrics", promhttp.Handler())
+	go func() {
+		http.ListenAndServe(fmt.Sprintf(":%d", httpPortInt), promhttp.Handler())
+	}()
+	log.Printf("Listening on port %v", httpPortInt)
+
+	for {
+		watcher.WatchSnapshots(snapshotConfigs)
+		<-time.After(time.Duration(pollIntSecInt) * time.Second)
+		log.Printf("Watching snapshots")
+	}
 }
 
 func loadVolumeSnapshotConfig(volumeSnapshotConfigFile string) *models.VolumeSnapshotConfigs {
@@ -145,28 +108,4 @@ func loadVolumeSnapshotConfig(volumeSnapshotConfigFile string) *models.VolumeSna
 		log.Fatalf("Error while deserialising volume snapshot config file: %v", err)
 	}
 	return snapshotConfigs
-}
-
-func getOpHandler() http.Handler {
-	return op.NewHandler(
-		op.NewStatus(name, description).
-			AddOwner("telecom", "#telecom").
-			SetRevision(gitHash).
-			ReadyUseHealthCheck().
-			AddLink("VCS Repo", "https://github.com/utilitywarehouse/ebs-snapshotter"),
-	)
-}
-
-func configureLogging(logLevel, logFormat *string) {
-	switch {
-	case *logFormat == "text":
-		log.SetFormatter(&log.TextFormatter{})
-	default:
-		log.SetFormatter(&log.JSONFormatter{})
-	}
-	level, err := log.ParseLevel(*logLevel)
-	if err != nil {
-		log.Fatalf("error parsing log level: %v", err)
-	}
-	log.SetLevel(level)
 }
