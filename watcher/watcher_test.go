@@ -5,12 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"strings"
-
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/sirupsen/logrus"
-	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/utilitywarehouse/ebs-snapshotter/clients"
 	"github.com/utilitywarehouse/ebs-snapshotter/models"
 	w "github.com/utilitywarehouse/ebs-snapshotter/watcher"
@@ -43,8 +39,6 @@ type WatcherSuite struct {
 func TestEBSWatcher(t *testing.T) { TestingT(t) }
 
 func (s *WatcherSuite) SetUpSuite(c *C) {
-	logrus.SetLevel(logrus.DebugLevel)
-
 	crCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "snapshots_performed",
 		Help: "A counter of the total number of snapshots created",
@@ -88,8 +82,6 @@ func (s *WatcherSuite) TestLogErrorWhenFailedToGetEC2Snapshots(c *C) {
 }
 
 func (s *WatcherSuite) TestSnapshotNotDeletedWhenUpToDateSnapshotAndRetentionPeriodNotExceeded(c *C) {
-	hook := test.NewGlobal()
-
 	intervalSeconds := int64(11)
 	config := models.VolumeSnapshotConfigs{
 		{
@@ -113,24 +105,9 @@ func (s *WatcherSuite) TestSnapshotNotDeletedWhenUpToDateSnapshotAndRetentionPer
 	snapshotsErrorOnGet = nil
 	volumesErrorOnGet = nil
 	s.watcher.WatchSnapshots(&config)
-
-	c.Assert(len(hook.Entries), Equals, 4)
-	c.Assert(hook.Entries[0].Level, Equals, logrus.InfoLevel)
-	c.Assert(hook.Entries[0].Message, Equals, "checking volumes and snapshots")
-
-	c.Assert(hook.Entries[1].Level, Equals, logrus.DebugLevel)
-	c.Assert(strings.Contains(hook.Entries[1].Message, "volume volume-1 has an up to date snapshot"), Equals, true)
-
-	c.Assert(hook.Entries[2].Level, Equals, logrus.InfoLevel)
-	c.Assert(strings.Contains(hook.Entries[2].Message, "skipped snapshot removal, retention period not exceeded, volume: volume-1, snapshot id: snapshot-1"), Equals, true)
-
-	c.Assert(hook.Entries[3].Level, Equals, logrus.InfoLevel)
-	c.Assert(hook.Entries[3].Message, Equals, "finished checking volumes and snapshots")
 }
 
 func (s *WatcherSuite) TestIfOldSnapshotNotDeletedOnCreateNewSnapshotError(c *C) {
-	hook := test.NewGlobal()
-
 	intervalSeconds := int64(11)
 	config := models.VolumeSnapshotConfigs{
 		{
@@ -160,22 +137,9 @@ func (s *WatcherSuite) TestIfOldSnapshotNotDeletedOnCreateNewSnapshotError(c *C)
 	snapshotErrorOnRemove = nil
 
 	s.watcher.WatchSnapshots(&config)
-
-	c.Assert(len(hook.Entries), Equals, 3)
-	c.Assert(hook.Entries[0].Level, Equals, logrus.InfoLevel)
-	c.Assert(hook.Entries[0].Message, Equals, "checking volumes and snapshots")
-
-	c.Assert(hook.Entries[1].Level, Equals, logrus.ErrorLevel)
-	c.Assert(hook.Entries[1].Message, Equals, "error occurred while creating a new snapshot")
-	c.Assert(hook.Entries[1].Data["error"].(error).Error(), Equals, errorMsg)
-
-	c.Assert(hook.Entries[2].Level, Equals, logrus.InfoLevel)
-	c.Assert(hook.Entries[2].Message, Equals, "finished checking volumes and snapshots")
 }
 
 func (s *WatcherSuite) TestIfOldSnapshotNotDeletedWhenRetentionPeriodNotExceeded(c *C) {
-	hook := test.NewGlobal()
-
 	intervalSeconds := int64(11)
 	config := models.VolumeSnapshotConfigs{
 		{
@@ -204,24 +168,9 @@ func (s *WatcherSuite) TestIfOldSnapshotNotDeletedWhenRetentionPeriodNotExceeded
 	snapshotErrorOnRemove = nil
 
 	s.watcher.WatchSnapshots(&config)
-
-	c.Assert(len(hook.Entries), Equals, 4)
-	c.Assert(hook.Entries[0].Level, Equals, logrus.InfoLevel)
-	c.Assert(hook.Entries[0].Message, Equals, "checking volumes and snapshots")
-
-	c.Assert(hook.Entries[1].Level, Equals, logrus.InfoLevel)
-	c.Assert(strings.Contains(hook.Entries[1].Message, "created a new snapshot for volume-1 volume"), Equals, true)
-
-	c.Assert(hook.Entries[2].Level, Equals, logrus.InfoLevel)
-	c.Assert(strings.Contains(hook.Entries[2].Message, "skipped snapshot removal, retention period not exceeded, volume: volume-1, snapshot id: snapshot-1"), Equals, true)
-
-	c.Assert(hook.Entries[3].Level, Equals, logrus.InfoLevel)
-	c.Assert(hook.Entries[3].Message, Equals, "finished checking volumes and snapshots")
 }
 
 func (s *WatcherSuite) TestIfOldSnapshotDeletedWhenRetentionPeriodExceeded(c *C) {
-	hook := test.NewGlobal()
-
 	intervalSeconds := int64(11)
 	config := models.VolumeSnapshotConfigs{
 		{
@@ -251,23 +200,9 @@ func (s *WatcherSuite) TestIfOldSnapshotDeletedWhenRetentionPeriodExceeded(c *C)
 
 	s.watcher.WatchSnapshots(&config)
 
-	c.Assert(len(hook.Entries), Equals, 4)
-	c.Assert(hook.Entries[0].Level, Equals, logrus.InfoLevel)
-	c.Assert(hook.Entries[0].Message, Equals, "checking volumes and snapshots")
-
-	c.Assert(hook.Entries[1].Level, Equals, logrus.InfoLevel)
-	c.Assert(strings.Contains(hook.Entries[1].Message, "created a new snapshot for volume-1 volume, old snapshot id: snapshot-1"), Equals, true)
-
-	c.Assert(hook.Entries[2].Level, Equals, logrus.InfoLevel)
-	c.Assert(hook.Entries[2].Message, Equals, "old snapshot with id snapshot-1 for volume volume-1 has been deleted")
-
-	c.Assert(hook.Entries[3].Level, Equals, logrus.InfoLevel)
-	c.Assert(hook.Entries[3].Message, Equals, "finished checking volumes and snapshots")
 }
 
 func (s *WatcherSuite) TestIfOldSnapshotNotDeletedWhileRemovingOldSnapshotEncounteredError(c *C) {
-	hook := test.NewGlobal()
-
 	intervalSeconds := int64(11)
 	config := models.VolumeSnapshotConfigs{
 		{
@@ -299,24 +234,9 @@ func (s *WatcherSuite) TestIfOldSnapshotNotDeletedWhileRemovingOldSnapshotEncoun
 
 	s.watcher.WatchSnapshots(&config)
 
-	c.Assert(len(hook.Entries), Equals, 4)
-	c.Assert(hook.Entries[0].Level, Equals, logrus.InfoLevel)
-	c.Assert(hook.Entries[0].Message, Equals, "checking volumes and snapshots")
-
-	c.Assert(hook.Entries[1].Level, Equals, logrus.InfoLevel)
-	c.Assert(strings.Contains(hook.Entries[1].Message, "created a new snapshot for volume-1 volume"), Equals, true)
-
-	c.Assert(hook.Entries[2].Level, Equals, logrus.ErrorLevel)
-	c.Assert(hook.Entries[2].Message, Equals, "failed to remove old snapshot")
-	c.Assert(hook.Entries[2].Data["error"].(error).Error(), Equals, errorMsg)
-
-	c.Assert(hook.Entries[3].Level, Equals, logrus.InfoLevel)
-	c.Assert(hook.Entries[3].Message, Equals, "finished checking volumes and snapshots")
 }
 
 func (s *WatcherSuite) TestOnlyOldSnapshotDeletedWhenRetentionPeriodExceeded(c *C) {
-	hook := test.NewGlobal()
-
 	intervalSeconds := int64(11)
 	config := models.VolumeSnapshotConfigs{
 		{
@@ -361,22 +281,6 @@ func (s *WatcherSuite) TestOnlyOldSnapshotDeletedWhenRetentionPeriodExceeded(c *
 	snapshotErrorOnRemove = nil
 
 	s.watcher.WatchSnapshots(&config)
-
-	c.Assert(len(hook.Entries), Equals, 5)
-	c.Assert(hook.Entries[0].Level, Equals, logrus.InfoLevel)
-	c.Assert(hook.Entries[0].Message, Equals, "checking volumes and snapshots")
-
-	c.Assert(hook.Entries[1].Level, Equals, logrus.InfoLevel)
-	c.Assert(strings.Contains(hook.Entries[1].Message, "created a new snapshot for volume-1 volume"), Equals, true)
-
-	c.Assert(hook.Entries[2].Level, Equals, logrus.InfoLevel)
-	c.Assert(hook.Entries[2].Message, Equals, "old snapshot with id snapshot-1 for volume volume-1 has been deleted")
-
-	c.Assert(hook.Entries[3].Level, Equals, logrus.InfoLevel)
-	c.Assert(strings.Contains(hook.Entries[3].Message, "skipped snapshot removal, retention period not exceeded, volume: volume-1, snapshot id: snapshot-2"), Equals, true)
-
-	c.Assert(hook.Entries[4].Level, Equals, logrus.InfoLevel)
-	c.Assert(hook.Entries[4].Message, Equals, "finished checking volumes and snapshots")
 }
 
 func createFakeVolume(snapshotId, volumeId, tagKey, tagValue string) *ec2.Volume {
